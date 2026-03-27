@@ -1,0 +1,14 @@
+{
+  "buildCommand": "prisma db push && next build",
+  "regions": ["gru1"],
+  "crons": [
+    {
+      "path": "/api/cron/quotes",
+      "schedule": "*/5 10-18 * * 1-5"
+    },
+    {
+      "path": "/api/cron/close-prices",
+      "schedule": "30 18 * * 1-5"
+    }
+  ]
+}
