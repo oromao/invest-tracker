@@ -13,6 +13,54 @@ import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 
+// ─── Market Ticker ─────────────────────────────────────────────────────────
+
+const TICKERS = [
+  { ticker: 'BTC',  label: 'Bitcoin' },
+  { ticker: 'ETH',  label: 'Ethereum' },
+  { ticker: 'SOL',  label: 'Solana' },
+]
+
+interface Quote { ticker: string; price: number; changePercent?: number }
+
+function MarketTicker() {
+  const queries = TICKERS.map(t =>
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    useQuery<Quote>({
+      queryKey: ['quote', t.ticker],
+      queryFn: () => fetch(`/api/quotes/${t.ticker}?type=CRYPTO`).then(r => r.json()),
+      refetchInterval: 60_000,
+      staleTime: 55_000,
+    })
+  )
+
+  return (
+    <div className="grid grid-cols-3 gap-3">
+      {TICKERS.map((t, i) => {
+        const q = queries[i].data
+        const pct = q?.changePercent ?? 0
+        return (
+          <Card key={t.ticker} className="flex items-center justify-between py-3">
+            <div>
+              <p className="text-xs text-white/50">{t.label}</p>
+              <p className="text-sm font-bold text-white">
+                {q ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(q.price) : '—'}
+              </p>
+            </div>
+            {q ? (
+              <span className={`text-xs font-medium ${pct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+              </span>
+            ) : (
+              <Skeleton className="w-12 h-4" />
+            )}
+          </Card>
+        )
+      })}
+    </div>
+  )
+}
+
 interface Position {
   asset: {
     id: string
@@ -72,10 +120,16 @@ function TableSkeleton() {
 }
 
 export default function DashboardPage() {
-  const { data, isLoading, error } = useQuery<PortfolioSummary>({
+  const { data, isLoading, error, dataUpdatedAt } = useQuery<PortfolioSummary>({
     queryKey: ['portfolio'],
     queryFn: () => fetch('/api/portfolio').then((r) => r.json()),
+    refetchInterval: 60_000,
+    staleTime: 55_000,
   })
+
+  const lastUpdated = dataUpdatedAt
+    ? new Date(dataUpdatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    : null
 
   const pieData = data
     ? Object.entries(data.byType).map(([type, { value }]) => ({
@@ -102,10 +156,17 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-        <p className="text-white/50 text-sm mt-1">Resumo do seu portfólio de investimentos</p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Dashboard</h1>
+          <p className="text-white/50 text-sm mt-1">Resumo do seu portfólio de investimentos</p>
+        </div>
+        {lastUpdated && (
+          <p className="text-xs text-white/30 mt-1">Atualizado às {lastUpdated} · auto-refresh a cada 60s</p>
+        )}
       </div>
+
+      <MarketTicker />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
