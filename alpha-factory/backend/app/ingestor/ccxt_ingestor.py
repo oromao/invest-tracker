@@ -11,10 +11,29 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.data.validator import validate_and_clean_bars
 from app.db.models import OHLCVBar
 from app.db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
+
+_RETRY_DELAYS = (2, 4, 8)  # seconds between retries
+
+
+async def _retry_async(coro_fn, *args, label: str = "ccxt", **kwargs):
+    """Call an async function with exponential-backoff retry."""
+    last_exc: Exception = RuntimeError("unreachable")
+    for attempt, delay in enumerate((*_RETRY_DELAYS, None), start=1):
+        try:
+            return await coro_fn(*args, **kwargs)
+        except Exception as exc:
+            last_exc = exc
+            if delay is None:
+                break
+            logger.warning("%s attempt %d failed: %s — retrying in %ds", label, attempt, exc, delay)
+            await asyncio.sleep(delay)
+    logger.error("%s failed after %d attempts: %s", label, len(_RETRY_DELAYS) + 1, last_exc)
+    return None
 
 
 class CCXTIngestor:
@@ -51,8 +70,8 @@ class CCXTIngestor:
         timeframe: str,
         limit: int = 500,
     ) -> List[dict]:
-        exchange = await self._get_exchange()
-        try:
+        async def _fetch():
+            exchange = await self._get_exchange()
             raw = await exchange.fetch_ohlcv(asset, timeframe, limit=limit)
             bars = []
             for row in raw:
@@ -70,37 +89,53 @@ class CCXTIngestor:
                     }
                 )
             return bars
-        except Exception as exc:
-            logger.error("fetch_ohlcv %s %s error: %s", asset, timeframe, exc)
+
+        result = await _retry_async(_fetch, label=f"fetch_ohlcv/{asset}/{timeframe}")
+        if result is None:
             return []
 
+        # Validate and clean before returning
+        clean, vr = validate_and_clean_bars(result, timeframe, asset)
+        if vr.rejected_count > 0:
+            logger.warning(
+                "Dropped %d invalid bars for %s/%s",
+                vr.rejected_count, asset, timeframe,
+            )
+        return clean
+
     async def fetch_funding_rate(self, asset: str) -> Optional[float]:
-        exchange = await self._get_exchange()
-        try:
+        async def _fetch():
+            exchange = await self._get_exchange()
             result = await exchange.fetch_funding_rate(asset)
             return float(result.get("fundingRate", 0.0) or 0.0)
-        except Exception as exc:
-            logger.debug("fetch_funding_rate %s error: %s", asset, exc)
-            return None
+
+        val = await _retry_async(_fetch, label=f"funding_rate/{asset}")
+        if val is None:
+            logger.debug("fetch_funding_rate %s: all retries failed", asset)
+        return val
 
     async def fetch_open_interest(self, asset: str) -> Optional[float]:
-        exchange = await self._get_exchange()
-        try:
+        async def _fetch():
+            exchange = await self._get_exchange()
             result = await exchange.fetch_open_interest(asset)
             val = result.get("openInterestAmount") or result.get("openInterest")
             return float(val) if val is not None else None
-        except Exception as exc:
-            logger.debug("fetch_open_interest %s error: %s", asset, exc)
-            return None
+
+        val = await _retry_async(_fetch, label=f"open_interest/{asset}")
+        if val is None:
+            logger.debug("fetch_open_interest %s: all retries failed", asset)
+        return val
 
     async def fetch_mark_price(self, asset: str) -> Optional[float]:
-        exchange = await self._get_exchange()
-        try:
+        async def _fetch():
+            exchange = await self._get_exchange()
             ticker = await exchange.fetch_ticker(asset)
             return float(ticker.get("last") or ticker.get("close") or 0.0)
-        except Exception as exc:
-            logger.debug("fetch_mark_price %s error: %s", asset, exc)
-            return None
+
+        val = await _retry_async(_fetch, label=f"mark_price/{asset}")
+        if val is None:
+            logger.debug("fetch_mark_price %s: all retries failed", asset)
+        return val
 
     async def upsert_bars(
         self,
@@ -113,23 +148,22 @@ class CCXTIngestor:
         if not bars:
             return 0
 
-        rows = []
-        for bar in bars:
-            rows.append(
-                {
-                    "asset": bar["asset"],
-                    "timeframe": bar["timeframe"],
-                    "timestamp": bar["timestamp"],
-                    "open": bar["open"],
-                    "high": bar["high"],
-                    "low": bar["low"],
-                    "close": bar["close"],
-                    "volume": bar["volume"],
-                    "funding_rate": funding_rate,
-                    "open_interest": open_interest,
-                    "mark_price": mark_price,
-                }
-            )
+        rows = [
+            {
+                "asset": bar["asset"],
+                "timeframe": bar["timeframe"],
+                "timestamp": bar["timestamp"],
+                "open": bar["open"],
+                "high": bar["high"],
+                "low": bar["low"],
+                "close": bar["close"],
+                "volume": bar["volume"],
+                "funding_rate": funding_rate,
+                "open_interest": open_interest,
+                "mark_price": mark_price,
+            }
+            for bar in bars
+        ]
 
         stmt = (
             pg_insert(OHLCVBar)
@@ -160,7 +194,7 @@ class CCXTIngestor:
         open_interest = None
         mark_price = None
 
-        # Only fetch funding/OI for primary timeframe to avoid rate limits
+        # Only fetch funding/OI for primary timeframes to avoid rate limits
         if timeframe in ("1h", "4h", "1d"):
             funding_rate = await self.fetch_funding_rate(asset)
             await asyncio.sleep(0.1)
