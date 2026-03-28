@@ -16,7 +16,7 @@ from app.db.models import RagDocument
 
 logger = logging.getLogger(__name__)
 
-VECTOR_DIM = 13  # Must match number of features used in embed_state
+VECTOR_DIM = 13  # Must match number of features in FEATURE_KEYS
 FEATURE_KEYS = [
     "returns_1",
     "returns_5",
@@ -35,15 +35,13 @@ FEATURE_KEYS = [
 
 
 def embed_state(features: Dict[str, float]) -> np.ndarray:
-    """
-    Convert a feature dict into a fixed-size float32 vector.
-    Missing features default to 0.0.
-    """
+    """Convert a feature dict into a normalised float32 unit vector."""
     vec = np.array(
         [float(features.get(k, 0.0) or 0.0) for k in FEATURE_KEYS],
         dtype=np.float32,
     )
-    # Normalize to unit vector for cosine similarity
+    # Replace any NaN/inf that slipped through
+    vec = np.nan_to_num(vec, nan=0.0, posinf=0.0, neginf=0.0)
     norm = np.linalg.norm(vec)
     if norm > 1e-9:
         vec = vec / norm
@@ -90,8 +88,8 @@ class RagStore:
         payload = {
             "asset": asset,
             "timeframe": timeframe,
-            "trade_outcome": str(outcome),
-            "risk_reward": outcome,
+            "trade_outcome": "win" if outcome > 0 else ("loss" if outcome < 0 else "open"),
+            "risk_reward": float(outcome),
             "context_summary": "",
             "regime": "",
         }
@@ -118,7 +116,7 @@ class RagStore:
         trade_outcome: Optional[str] = None,
         risk_reward: Optional[float] = None,
     ) -> RagDocument:
-        """Full store_state that persists to both Qdrant and the RagDocument table."""
+        """Full store_state: persist to both Qdrant and the RagDocument table."""
         await self.ensure_collection()
         client = self._get_client()
 
@@ -163,14 +161,21 @@ class RagStore:
         features: Dict[str, float],
         top_k: int = 3,
         asset_filter: Optional[str] = None,
+        min_score: Optional[float] = None,
     ) -> List[Dict]:
         """
         Retrieve top_k most similar past market states from Qdrant.
+        Results with score < min_score (default: settings.rag_min_score) are dropped.
         Returns list of payload dicts with similarity scores.
         """
+        effective_min_score = min_score if min_score is not None else settings.rag_min_score
         try:
             client = self._get_client()
             vec = embed_state(features)
+
+            # Only query if we have a meaningful vector
+            if np.linalg.norm(vec) < 1e-9:
+                return []
 
             query_filter = None
             if asset_filter:
@@ -191,7 +196,7 @@ class RagStore:
                 with_payload=True,
             )
 
-            return [
+            hits = [
                 {
                     "score": hit.score,
                     "asset": hit.payload.get("asset") if hit.payload else None,
@@ -202,7 +207,9 @@ class RagStore:
                     "vector_id": hit.id,
                 }
                 for hit in results.points
+                if hit.score >= effective_min_score  # quality gate
             ]
+            return hits
         except Exception as exc:
             logger.error("RAG retrieve error: %s", exc)
             return []

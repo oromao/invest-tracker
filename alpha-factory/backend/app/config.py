@@ -25,15 +25,37 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("TIMEFRAMES", "TIMEFRAMES_RAW", "timeframes_raw"),
     )
 
+    # Triple barrier labeling
     tb_pt: float = 0.02
     tb_sl: float = 0.01
     tb_t: int = 48
 
+    # Risk engine
     risk_max_exposure: float = 0.20
     risk_daily_loss_limit: float = 0.03
     risk_min_rr: float = 1.5
+    risk_position_size_pct: float = 0.01  # fraction of capital to risk per trade
 
+    # Execution
+    dry_run: bool = True  # never place real orders when True
+
+    # Backtest realism
+    backtest_fee_pct: float = 0.001       # 0.1% taker fee per side
+    backtest_slippage_pct: float = 0.0002 # 2bps market impact slippage
+
+    # Strategy promotion / quant quality gates
+    min_trades_for_promotion: int = 30    # minimum trades to be considered for promotion
+    oos_min_sharpe_ratio: float = 0.5     # OOS Sharpe must be >= oos_min_sharpe_ratio * IS Sharpe
+    promotion_min_sharpe: float = 1.0
+    promotion_min_pf: float = 1.3
+    promotion_confirmed_runs: int = 3     # confirmed backtests required before going active
+
+    # RAG quality
+    rag_min_score: float = 0.50           # minimum cosine similarity to include in context
     qdrant_collection: str = "alpha_factory_rag"
+
+    # Signal cooldown (seconds) — avoid duplicate signals for same asset
+    signal_cooldown_seconds: int = 1800   # 30 minutes
 
     cors_origins: list[str] = ["*"]
 

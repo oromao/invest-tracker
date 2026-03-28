@@ -46,12 +46,12 @@ def _macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> 
     ema_slow = close.ewm(span=slow, adjust=False).mean()
     macd_line = ema_fast - ema_slow
     signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-    histogram = macd_line - signal_line
-    return histogram
+    return macd_line - signal_line
 
 
-def _vwap(close: pd.Series, volume: pd.Series) -> pd.Series:
-    typical_price = close  # simplified: use close as typical
+def _vwap(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series) -> pd.Series:
+    """VWAP using standard (H+L+C)/3 typical price."""
+    typical_price = (high + low + close) / 3
     cumulative_tp_vol = (typical_price * volume).cumsum()
     cumulative_vol = volume.cumsum().replace(0, np.nan)
     return cumulative_tp_vol / cumulative_vol
@@ -61,8 +61,8 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Compute all features from OHLCV dataframe.
     df must have columns: open, high, low, close, volume, funding_rate, open_interest
-    index: DatetimeIndex sorted ascending
-    Returns dataframe with feature columns.
+    index: DatetimeIndex sorted ascending.
+    Returns dataframe with feature columns (NaN rows preserved — filtered at upsert time).
     """
     feats = pd.DataFrame(index=df.index)
 
@@ -85,8 +85,8 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     # MACD histogram
     feats["macd_hist"] = _macd(close, 12, 26, 9)
 
-    # VWAP
-    feats["vwap"] = _vwap(close, volume)
+    # VWAP — correct (H+L+C)/3 typical price
+    feats["vwap"] = _vwap(high, low, close, volume)
 
     # MA distances
     sma_20 = close.rolling(20, min_periods=20).mean()
@@ -94,7 +94,7 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     feats["ma_dist_20"] = (close - sma_20) / sma_20.replace(0, np.nan)
     feats["ma_dist_50"] = (close - sma_50) / sma_50.replace(0, np.nan)
 
-    # Volatility
+    # Annualised volatility
     returns = close.pct_change()
     feats["volatility_20"] = returns.rolling(20, min_periods=20).std() * np.sqrt(252)
 
@@ -110,7 +110,7 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     else:
         feats["funding_delta"] = np.nan
 
-    # Open interest delta
+    # Open interest delta (fractional change)
     if "open_interest" in df.columns:
         oi = df["open_interest"].ffill()
         prev_oi = oi.shift(1).replace(0, np.nan)
@@ -127,7 +127,7 @@ class FeatureEngine:
         session: AsyncSession,
         asset: str,
         timeframe: str,
-        limit: int = 200,
+        limit: int = 500,
     ) -> pd.DataFrame:
         stmt = (
             select(OHLCVBar)
@@ -168,7 +168,7 @@ class FeatureEngine:
         rows = []
         for ts, row in feats_df.iterrows():
             for feat_name, value in row.items():
-                if pd.isna(value):
+                if pd.isna(value) or not np.isfinite(value):
                     continue
                 rows.append(
                     {
@@ -183,7 +183,6 @@ class FeatureEngine:
         if not rows:
             return 0
 
-        # Batch upsert in chunks to avoid parameter limits
         chunk_size = 500
         total = 0
         for i in range(0, len(rows), chunk_size):
@@ -205,13 +204,12 @@ class FeatureEngine:
         async with AsyncSessionLocal() as session:
             df = await self._load_ohlcv(session, asset, timeframe)
             if df.empty or len(df) < 50:
-                logger.warning("Not enough OHLCV data for %s/%s", asset, timeframe)
+                logger.warning("Not enough OHLCV data for features %s/%s (need >=50, got %d)",
+                               asset, timeframe, len(df))
                 return 0
 
             feats_df = compute_features(df)
-            # Only keep last 100 rows to avoid huge upserts
-            feats_df = feats_df.tail(100)
-
+            # Upsert ALL computed rows — no arbitrary tail() cap
             count = await self._upsert_features(session, asset, timeframe, feats_df)
             await session.commit()
 

@@ -8,7 +8,8 @@ from typing import Dict, List, Optional, Tuple
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import DirectionEnum, Signal, Strategy, StrategyStatusEnum
+from app.config import settings
+from app.db.models import DirectionEnum, OHLCVBar, Signal, Strategy, StrategyStatusEnum
 from app.db.session import AsyncSessionLocal
 from app.features.engine import FeatureEngine
 from app.llm.client import generate_signal_narrative
@@ -31,10 +32,7 @@ def _apply_strategy_logic(
     strategy: Optional[Strategy],
     regime: Optional[str],
 ) -> Tuple[DirectionEnum, float]:
-    """
-    Generate raw direction and confidence from features + strategy params.
-    Returns (direction, confidence).
-    """
+    """Generate raw direction and confidence from features + strategy params."""
     if strategy is None:
         return DirectionEnum.NO_TRADE, 0.0
 
@@ -120,6 +118,59 @@ def _apply_strategy_logic(
     return direction, float(confidence)
 
 
+async def _update_rag_with_realized_outcome(
+    asset: str,
+    timeframe: str,
+    current_price: float,
+    session: AsyncSession,
+) -> None:
+    """
+    Look up the most recent previous signal for this asset and compute its
+    realized return. Store that outcome in the RAG vector store so future
+    retrievals carry real trade outcomes (not zeros).
+    """
+    try:
+        from sqlalchemy import desc as _desc
+        stmt = (
+            select(Signal)
+            .where(
+                Signal.asset == asset,
+                Signal.timeframe == timeframe,
+                Signal.direction != DirectionEnum.NO_TRADE,
+                Signal.entry_price.is_not(None),
+            )
+            .order_by(_desc(Signal.timestamp))
+            .limit(1)
+        )
+        result = await session.execute(stmt)
+        prev_signal = result.scalar_one_or_none()
+
+        if prev_signal and prev_signal.entry_price and prev_signal.entry_price > 0:
+            dir_int = 1 if prev_signal.direction == DirectionEnum.LONG else -1
+            realized_ret = (current_price - prev_signal.entry_price) / prev_signal.entry_price * dir_int
+            outcome_str = "win" if realized_ret > 0 else "loss"
+            rr = abs(realized_ret) / max(
+                abs((prev_signal.sl or prev_signal.entry_price) - prev_signal.entry_price) / prev_signal.entry_price,
+                0.001,
+            )
+            if realized_ret < 0:
+                rr = -rr
+
+            await rag_store.store_state(
+                asset=asset,
+                timeframe=timeframe,
+                timestamp=prev_signal.timestamp,
+                features={},  # embedding already stored; we update outcome only
+                outcome=round(rr, 4),
+            )
+            logger.debug(
+                "Updated RAG outcome for %s prev signal: ret=%.3f%% outcome=%s",
+                asset, realized_ret * 100, outcome_str,
+            )
+    except Exception as exc:
+        logger.debug("RAG outcome update failed (non-fatal): %s", exc)
+
+
 class SignalEngine:
     async def generate_signal(
         self,
@@ -139,6 +190,7 @@ class SignalEngine:
             current_regime = regime_obj.regime.value if regime_obj else None
 
             # 3. Get active strategy (fallback chain: active → candidate → draft)
+            active_strategy = None
             active_strategies = await strategy_registry.get_active_strategies(session)
             active_strategy = active_strategies[0] if active_strategies else None
 
@@ -146,19 +198,15 @@ class SignalEngine:
                 candidates = await strategy_registry.get_candidates(session)
                 active_strategy = candidates[0] if candidates else None
 
-            # Fallback to any draft strategy matching the current regime
             if active_strategy is None:
                 from sqlalchemy import select as sa_select
-                from app.db.models import StrategyStatusEnum
                 draft_stmt = sa_select(Strategy).where(
                     Strategy.status == StrategyStatusEnum.draft
                 ).order_by(Strategy.created_at.desc()).limit(5)
                 draft_result = await session.execute(draft_stmt)
                 drafts = list(draft_result.scalars().all())
-                # Prefer a draft whose regime matches current_regime
                 for d in drafts:
-                    import json as _json
-                    p = _json.loads(d.params_json) if d.params_json else {}
+                    p = json.loads(d.params_json) if d.params_json else {}
                     allowed = p.get("regime", [])
                     if not allowed or not current_regime or current_regime in allowed:
                         active_strategy = d
@@ -169,15 +217,10 @@ class SignalEngine:
             # 4. Generate raw direction from strategy logic
             direction, confidence = _apply_strategy_logic(features, active_strategy, current_regime)
 
-            # 5. Retrieve similar past setups from RAG
-            similar_states = rag_store.retrieve_similar(features, top_k=3, asset_filter=asset)
-            rag_context = rag_store.build_rag_context(similar_states)
-
-            # 6. Get entry price from latest OHLCV bar (features don't store close)
+            # 5. Get entry price from OHLCV (features table doesn't store close)
             entry_price = features.get("close", 0.0)
             if entry_price == 0.0:
                 from sqlalchemy import select as _sa_select, desc as _desc
-                from app.db.models import OHLCVBar
                 bar_stmt = _sa_select(OHLCVBar).where(
                     OHLCVBar.asset == asset, OHLCVBar.timeframe == timeframe
                 ).order_by(_desc(OHLCVBar.timestamp)).limit(1)
@@ -185,8 +228,17 @@ class SignalEngine:
                 latest_bar = bar_result.scalar_one_or_none()
                 if latest_bar:
                     entry_price = latest_bar.close
-            atr = features.get("atr_14", entry_price * 0.01 if entry_price > 0 else 100.0)
 
+            # 6. Update RAG with realized outcome of previous signal (best-effort)
+            if entry_price > 0:
+                await _update_rag_with_realized_outcome(asset, timeframe, entry_price, session)
+
+            # 7. Retrieve similar past setups from RAG
+            similar_states = rag_store.retrieve_similar(features, top_k=3, asset_filter=asset)
+            rag_context = rag_store.build_rag_context(similar_states)
+
+            # 8. Compute ATR-based TP/SL
+            atr = features.get("atr_14", entry_price * 0.01 if entry_price > 0 else 100.0)
             tp1 = tp2 = sl = None
             if direction != DirectionEnum.NO_TRADE and entry_price > 0:
                 dir_int = 1 if direction == DirectionEnum.LONG else -1
@@ -196,7 +248,7 @@ class SignalEngine:
                     atr=atr,
                 )
 
-            # 7. Apply risk filter
+            # 9. Risk filter (veto check)
             if direction != DirectionEnum.NO_TRADE and tp1 is not None and sl is not None:
                 sig_input = SignalInput(
                     asset=asset,
@@ -206,12 +258,21 @@ class SignalEngine:
                     sl_price=sl,
                     confidence=confidence,
                 )
-                risk_ok = risk_engine.check_signal(sig_input, portfolio_state)
-                if not risk_ok:
+                # Duplicate signal guard
+                if risk_engine.is_duplicate(sig_input, settings.signal_cooldown_seconds):
+                    logger.info(
+                        "Duplicate signal suppressed for %s/%s (%s) — within cooldown",
+                        asset, timeframe, direction.value,
+                    )
                     direction = DirectionEnum.NO_TRADE
                     confidence = 0.0
+                elif not risk_engine.check_signal(sig_input, portfolio_state):
+                    direction = DirectionEnum.NO_TRADE
+                    confidence = 0.0
+                else:
+                    risk_engine.record_signal(sig_input)
 
-            # 8. Build explanation via LLM (phi3:mini via Ollama), fallback to template
+            # 10. Build LLM narrative (Ollama phi3:mini, fallback to template)
             explanation = await generate_signal_narrative(
                 asset=asset,
                 timeframe=timeframe,
@@ -223,7 +284,7 @@ class SignalEngine:
                 strategy_name=active_strategy.name if active_strategy else None,
             )
 
-            # 9. Store signal
+            # 11. Persist signal
             now = datetime.now(tz=timezone.utc)
             signal = Signal(
                 asset=asset,
@@ -244,7 +305,7 @@ class SignalEngine:
             await session.commit()
             await session.refresh(signal)
 
-            # Populate Qdrant vector store (best-effort — don't break signal gen if unavailable)
+            # 12. Store current state in RAG for future retrieval (best-effort)
             try:
                 await rag_store.store_state(
                     asset=asset,
@@ -257,25 +318,22 @@ class SignalEngine:
                 logger.warning("RAG store_state failed (non-fatal): %s", rag_exc)
 
             logger.info(
-                "Generated signal for %s/%s: %s (conf=%.2f)",
-                asset,
-                timeframe,
-                direction.value,
-                confidence,
+                "Signal %s/%s: %s conf=%.3f entry=%.4f",
+                asset, timeframe, direction.value, confidence, entry_price,
             )
             return signal
 
     async def generate_all_signals(self, timeframe: str = "1h") -> List[Signal]:
-        from app.config import settings
+        from app.config import settings as _settings
 
         signals = []
         portfolio_state = PortfolioState()
 
-        for asset in settings.assets:
+        for asset in _settings.assets:
             try:
                 sig = await self.generate_signal(asset, timeframe, portfolio_state)
                 signals.append(sig)
             except Exception as exc:
-                logger.error("Error generating signal for %s/%s: %s", asset, timeframe, exc)
+                logger.error("Error generating signal %s/%s: %s", asset, timeframe, exc)
 
         return signals
