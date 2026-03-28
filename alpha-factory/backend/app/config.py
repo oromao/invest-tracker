@@ -33,6 +33,10 @@ class Settings(BaseSettings):
 
     invest_tracker_url: str = ""
 
+    ollama_url: str = "http://ollama:11434"
+    ollama_model: str = "phi3:mini"
+    llm_enabled: bool = True
+
     @field_validator('cors_origins', mode='before')
     @classmethod
     def parse_cors(cls, v):
