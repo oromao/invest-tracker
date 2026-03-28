@@ -81,6 +81,7 @@ class Feature(Base):
         UniqueConstraint(
             "asset", "timeframe", "timestamp", "feature_name", name="uq_feature_asset_tf_ts_name"
         ),
+        Index('ix_feature_asset_tf_ts', 'asset', 'timeframe', 'timestamp', 'feature_name'),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -183,6 +184,9 @@ class BacktestRun(Base):
 
 class Signal(Base):
     __tablename__ = "signals"
+    __table_args__ = (
+        Index('ix_signal_asset_tf_ts', 'asset', 'timeframe', 'timestamp'),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     asset: Mapped[str] = mapped_column(String(32), nullable=False, index=True)

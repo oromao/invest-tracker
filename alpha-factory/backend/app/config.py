@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import List
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +28,17 @@ class Settings(BaseSettings):
     risk_min_rr: float = 1.5
 
     qdrant_collection: str = "alpha_factory_rag"
+
+    cors_origins: list[str] = ["*"]
+
+    invest_tracker_url: str = ""
+
+    @field_validator('cors_origins', mode='before')
+    @classmethod
+    def parse_cors(cls, v):
+        if isinstance(v, str):
+            return [s.strip() for s in v.split(',')]
+        return v
 
     @property
     def assets(self) -> List[str]:
