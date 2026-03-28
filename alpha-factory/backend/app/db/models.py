@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -104,7 +105,7 @@ class MarketRegime(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     regime: Mapped[RegimeEnum] = mapped_column(Enum(RegimeEnum), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    features_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    market_features_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -218,11 +219,58 @@ class RagDocument(Base):
     asset: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     regime: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    features_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    market_features_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     context_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     trade_outcome: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     risk_reward: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     vector_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class Position(Base):
+    __tablename__ = "positions"
+    __table_args__ = (
+        Index(
+            "uq_one_open_pos_per_asset",
+            "asset",
+            unique=True,
+            postgresql_where=(text("status = 'open'")),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    asset: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    side: Mapped[DirectionEnum] = mapped_column(Enum(DirectionEnum), nullable=False)
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False)
+    size: Mapped[float] = mapped_column(Float, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")  # open, closed
+    strategy_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    exchange_ref: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    @property
+    def unrealized_pnl(self) -> float:
+        return 0.0
+
+
+class Trade(Base):
+    __tablename__ = "trades"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    asset: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    side: Mapped[DirectionEnum] = mapped_column(Enum(DirectionEnum), nullable=False)
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False)
+    exit_price: Mapped[float] = mapped_column(Float, nullable=False)
+    size: Mapped[float] = mapped_column(Float, nullable=False)
+    pnl: Mapped[float] = mapped_column(Float, nullable=False)
+    entry_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    exit_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    strategy_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -32,9 +32,12 @@ class Settings(BaseSettings):
 
     # Risk engine
     risk_max_exposure: float = 0.20
+    risk_max_directional_delta: float = 0.10  # max 10% net bias (LONGs - SHORTs)
     risk_daily_loss_limit: float = 0.03
     risk_min_rr: float = 1.5
-    risk_position_size_pct: float = 0.01  # fraction of capital to risk per trade
+    risk_position_size_pct: float = 0.01      # fraction of capital to risk per trade
+    risk_max_positions_per_asset: int = 2
+    risk_stale_data_threshold: float = 2.0    # multiplier for timeframe interval
 
     # Execution
     dry_run: bool = True  # never place real orders when True

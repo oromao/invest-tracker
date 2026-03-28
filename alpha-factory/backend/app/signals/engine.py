@@ -9,8 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.db.models import DirectionEnum, OHLCVBar, Signal, Strategy, StrategyStatusEnum
-from app.db.session import AsyncSessionLocal
+from app.db.models import DirectionEnum, OHLCVBar, Position, Signal, Strategy, StrategyStatusEnum
+from app.db.session import AsyncSessionLocal, async_session_factory
 from app.features.engine import FeatureEngine
 from app.llm.client import generate_signal_narrative
 from app.regime.detector import RegimeDetector
@@ -172,6 +172,73 @@ async def _update_rag_with_realized_outcome(
 
 
 class SignalEngine:
+    async def _fetch_portfolio_state(self, session: AsyncSession) -> PortfolioState:
+        """Fetch current portfolio state from database."""
+        # 1. Start with settings default capital (or fetch from exchange if live)
+        capital = 1000.0  # Default dry-run capital to match ExecutionEngine
+        
+        # 2. Get active positions
+        stmt = select(Position).where(Position.status == "open")
+        result = await session.execute(stmt)
+        positions = result.scalars().all()
+        
+        open_pos_dicts = [
+            {"asset": p.asset, "direction": p.side.value} for p in positions
+        ]
+        
+        # 3. Calculate exposure
+        total_exposure = 0.0
+        for p in positions:
+            # We use latest features or bar for current value
+            total_exposure += (p.size * p.entry_price) / max(capital, 1.0)
+
+        return PortfolioState(
+            capital=capital,
+            open_positions=open_pos_dicts,
+            total_exposure=total_exposure
+        )
+
+    async def _has_recent_signal(
+        self, 
+        session: AsyncSession, 
+        asset: str, 
+        direction: DirectionEnum, 
+        timeframe: str,
+        regime: Optional[str] = None
+    ) -> bool:
+        """
+        Check database for identical signal within an adaptive cooldown period.
+        Cooldown depends on timeframe (longer for higher) and regime (longer for choppy).
+        """
+        from sqlalchemy import desc
+        from datetime import timedelta
+        
+        # Adaptive cooldown calculation
+        # Base multiplier: 1m -> 1x, 1h -> 60x, etc.
+        # But we use a log-scale or simple multiplier for 1800s base
+        base_cooldown = settings.signal_cooldown_seconds
+        
+        tf_mult = 1.0
+        if timeframe == "1h": tf_mult = 4.0
+        elif timeframe == "4h": tf_mult = 8.0
+        elif timeframe == "1d": tf_mult = 24.0
+        
+        regime_mult = 1.0
+        if regime in ["range", "high_vol"]:
+            regime_mult = 2.0 # More conservative in choppy/high-vol
+            
+        final_cooldown = base_cooldown * tf_mult * regime_mult
+        
+        cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=final_cooldown)
+        stmt = select(Signal).where(
+            Signal.asset == asset,
+            Signal.direction == direction,
+            Signal.timestamp >= cutoff
+        ).limit(1)
+        
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
     async def generate_signal(
         self,
         asset: str,
@@ -183,15 +250,41 @@ class SignalEngine:
 
         async with AsyncSessionLocal() as session:
             # 1. Get latest features
-            features = await feature_engine.get_latest_features(session, asset, timeframe)
+            features, feat_ts = await feature_engine.get_latest_features(session, asset, timeframe)
+
+            # 1b. Stale Data Protection
+            if feat_ts:
+                # Calculate allowance based on timeframe (e.g. 1m -> 120s, 1h -> 7200s)
+                # We default to 1m if not parseable
+                tf_secs = 60
+                if timeframe.endswith("m"): tf_secs = int(timeframe[:-1]) * 60
+                elif timeframe.endswith("h"): tf_secs = int(timeframe[:-1]) * 3600
+                elif timeframe.endswith("d"): tf_secs = int(timeframe[:-1]) * 86400
+                
+                max_delay = tf_secs * settings.risk_stale_data_threshold
+                delay = (datetime.now(timezone.utc) - feat_ts).total_seconds()
+                
+                if delay > max_delay:
+                    logger.warning(
+                        "Signal %s/%s BLOCKED: Stale data (delay %.1fs > limit %.1fs)",
+                        asset, timeframe, delay, max_delay
+                    )
+                    # Return a NO_TRADE signal immediately
+                    return Signal(
+                        asset=asset, timeframe=timeframe, timestamp=datetime.now(timezone.utc),
+                        direction=DirectionEnum.NO_TRADE, confidence=0.0,
+                        explanation=f"VETO: Data stale by {delay:.0f}s"
+                    )
 
             # 2. Get current regime
             regime_obj = await regime_detector.get_latest_regime(session, asset, timeframe)
             current_regime = regime_obj.regime.value if regime_obj else None
 
-            # 3. Get active strategy (fallback chain: active → candidate → draft)
+            # 3. Get active strategy (ONLY active/candidate, NEVER deprecated)
             active_strategy = None
             active_strategies = await strategy_registry.get_active_strategies(session)
+            # Ensure we only pick non-deprecated
+            active_strategies = [s for s in active_strategies if s.status != StrategyStatusEnum.deprecated]
             active_strategy = active_strategies[0] if active_strategies else None
 
             if active_strategy is None:
@@ -258,10 +351,17 @@ class SignalEngine:
                     sl_price=sl,
                     confidence=confidence,
                 )
-                # Duplicate signal guard
-                if risk_engine.is_duplicate(sig_input, settings.signal_cooldown_seconds):
+                # Duplicate signal guard (Check DB first)
+                if await self._has_recent_signal(session, asset, direction, timeframe, current_regime):
                     logger.info(
-                        "Duplicate signal suppressed for %s/%s (%s) — within cooldown",
+                        "Duplicate signal suppressed for %s/%s (%s) — FOUND IN DB with adaptive cooldown",
+                        asset, timeframe, direction.value,
+                    )
+                    direction = DirectionEnum.NO_TRADE
+                    confidence = 0.0
+                elif risk_engine.is_duplicate(sig_input, settings.signal_cooldown_seconds):
+                    logger.info(
+                        "Duplicate signal suppressed for %s/%s (%s) — within IN-MEMORY cooldown",
                         asset, timeframe, direction.value,
                     )
                     direction = DirectionEnum.NO_TRADE
@@ -324,16 +424,21 @@ class SignalEngine:
             return signal
 
     async def generate_all_signals(self, timeframe: str = "1h") -> List[Signal]:
-        from app.config import settings as _settings
-
         signals = []
-        portfolio_state = PortfolioState()
+        
+        async with async_session_factory() as session:
+            portfolio_state = await self._fetch_portfolio_state(session)
+            logger.info(
+                "Starting signal generation for %s. Portfolio: Exposure=%.2f%% Open=%d",
+                timeframe, portfolio_state.total_exposure * 100, len(portfolio_state.open_positions)
+            )
 
-        for asset in _settings.assets:
-            try:
-                sig = await self.generate_signal(asset, timeframe, portfolio_state)
-                signals.append(sig)
-            except Exception as exc:
-                logger.error("Error generating signal %s/%s: %s", asset, timeframe, exc)
+            for asset in settings.assets:
+                try:
+                    # Note: generate_signal creates its own session, but we pass portfolio_state
+                    sig = await self.generate_signal(asset, timeframe, portfolio_state)
+                    signals.append(sig)
+                except Exception as exc:
+                    logger.error("Error generating signal %s/%s: %s", asset, timeframe, exc)
 
         return signals

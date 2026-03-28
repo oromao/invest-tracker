@@ -38,6 +38,9 @@ _JOB_TIMEOUTS = {
     "label_job": 180,
     "research_job": 600,
     "signal_job": 120,
+    "execution_job": 60,
+    "sync_positions_job": 120,
+    "audit_job": 180,
 }
 
 
@@ -133,6 +136,30 @@ async def _signal_coro() -> None:
             logger.error("Signal job error %s: %s", tf, exc)
 
 
+async def _execution_coro() -> None:
+    from app.execution.executor import ExecutionEngine
+    engine = ExecutionEngine()
+    try:
+        await engine.run_execution_cycle()
+    finally:
+        await engine.close()
+
+
+async def _sync_positions_coro() -> None:
+    from app.execution.executor import ExecutionEngine
+    engine = ExecutionEngine()
+    try:
+        await engine.sync_positions()
+    finally:
+        await engine.close()
+
+
+async def _audit_coro() -> None:
+    from app.risk.auditor import StrategyAuditor
+    auditor = StrategyAuditor()
+    await auditor.audit_all_strategies()
+
+
 async def _run_ingest_job() -> None:
     await _run_with_instrumentation("ingest_job", _ingest_coro())
 
@@ -155,6 +182,18 @@ async def _run_research_job() -> None:
 
 async def _run_signal_job() -> None:
     await _run_with_instrumentation("signal_job", _signal_coro())
+
+
+async def _run_execution_job() -> None:
+    await _run_with_instrumentation("execution_job", _execution_coro())
+
+
+async def _run_sync_positions_job() -> None:
+    await _run_with_instrumentation("sync_positions_job", _sync_positions_coro())
+
+
+async def _run_audit_job() -> None:
+    await _run_with_instrumentation("audit_job", _audit_coro())
 
 
 class AlphaScheduler:
@@ -217,6 +256,33 @@ class AlphaScheduler:
             max_instances=1,
             coalesce=True,
         )
+        self.scheduler.add_job(
+            _run_execution_job,
+            trigger=IntervalTrigger(minutes=1),
+            id="execution_job",
+            name="Execution Engine",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        self.scheduler.add_job(
+            _run_sync_positions_job,
+            trigger=IntervalTrigger(minutes=15),
+            id="sync_positions_job",
+            name="Position Sync",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        self.scheduler.add_job(
+            _run_audit_job,
+            trigger=IntervalTrigger(hours=1),
+            id="audit_job",
+            name="Strategy Auditor",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
 
     def start(self) -> None:
         self.scheduler.start()
@@ -248,4 +314,7 @@ class AlphaScheduler:
         await _run_features_job()
         await _run_regime_job()
         await _run_signal_job()
+        await _run_execution_job()
+        await _run_sync_positions_job()
+        await _run_audit_job()
         logger.info("Initial pipeline jobs complete")

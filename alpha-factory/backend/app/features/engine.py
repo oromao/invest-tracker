@@ -191,7 +191,7 @@ class FeatureEngine:
                 pg_insert(Feature)
                 .values(chunk)
                 .on_conflict_do_update(
-                    constraint="uq_feature_asset_tf_ts_name",
+                    constraint="uq_features_asset_tf_ts_name",
                     set_={"value": pg_insert(Feature).excluded.value},
                 )
             )
@@ -218,12 +218,12 @@ class FeatureEngine:
 
     async def get_latest_features(
         self, session: AsyncSession, asset: str, timeframe: str
-    ) -> Dict[str, float]:
-        """Return the most recent feature snapshot as a dict."""
+    ) -> tuple[Dict[str, float], Optional[datetime]]:
+        """Return the most recent feature snapshot and its timestamp."""
         stmt = text(
             """
             SELECT DISTINCT ON (feature_name)
-                feature_name, value
+                feature_name, value, timestamp
             FROM features
             WHERE asset = :asset AND timeframe = :timeframe
             ORDER BY feature_name, timestamp DESC
@@ -231,4 +231,12 @@ class FeatureEngine:
         )
         result = await session.execute(stmt, {"asset": asset, "timeframe": timeframe})
         rows = result.fetchall()
-        return {row.feature_name: row.value for row in rows}
+        
+        if not rows:
+            return {}, None
+            
+        feats = {row.feature_name: row.value for row in rows}
+        # Since we use DISTINCT ON, all rows might not have the SAME timestamp 
+        # but in practice they are upserted together. We take the max.
+        ts = max(row.timestamp for row in rows)
+        return feats, ts

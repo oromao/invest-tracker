@@ -101,7 +101,27 @@ class RiskEngine:
             )
             return False
 
-        # 3. Risk:Reward
+        # 3. Directional Delta (LONG - SHORT)
+        longs = sum(p["size"] for p in portfolio.open_positions if p["side"] == "LONG")
+        shorts = sum(p["size"] for p in portfolio.open_positions if p["side"] == "SHORT")
+        net_delta = (longs - shorts) / max(portfolio.capital, 1.0)
+        
+        # If signal is LONG and we are already too LONG, veto
+        if signal.direction == "LONG" and net_delta >= settings.risk_max_directional_delta:
+             logger.warning("Signal VETOED %s: Too LONG (delta %.2f)", signal.asset, net_delta)
+             return False
+        # If signal is SHORT and we are already too SHORT, veto
+        if signal.direction == "SHORT" and net_delta <= -settings.risk_max_directional_delta:
+             logger.warning("Signal VETOED %s: Too SHORT (delta %.2f)", signal.asset, net_delta)
+             return False
+
+        # 4. Max positions per asset
+        asset_count = sum(1 for p in portfolio.open_positions if p["asset"] == signal.asset)
+        if asset_count >= settings.risk_max_positions_per_asset:
+            logger.warning("Signal VETOED %s: Max positions reached (%d)", signal.asset, asset_count)
+            return False
+
+        # 5. Risk:Reward
         rr = self.compute_rr(signal)
         if rr < self.min_rr:
             logger.debug(
@@ -109,7 +129,7 @@ class RiskEngine:
             )
             return False
 
-        # 4. Correlation filter
+        # 6. Correlation filter
         if not self.check_correlation(signal, portfolio.open_positions):
             logger.debug(
                 "Signal VETOED %s: too many correlated positions", signal.asset

@@ -22,6 +22,9 @@ AsyncSessionLocal = async_sessionmaker(
     autocommit=False,
 )
 
+# Aliases for different module expectations
+async_session_factory = AsyncSessionLocal
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
@@ -33,3 +36,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
+
+
+# Alias for get_db
+get_session = get_db
