@@ -1,7 +1,7 @@
 [project]
 name = "alpha-factory"
 version = "0.1.0"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.32",
@@ -15,7 +15,6 @@ dependencies = [
   "numpy>=2.0",
   "scikit-learn>=1.5",
   "lightgbm>=4.5",
-  "vectorbt>=0.26",
   "qdrant-client>=1.12",
   "apscheduler>=3.10",
   "python-dotenv>=1.0",
@@ -26,8 +25,8 @@ dependencies = [
 ]
 
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.backends.legacy:build"
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]

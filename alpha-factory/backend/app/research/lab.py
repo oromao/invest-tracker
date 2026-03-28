@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -16,6 +16,20 @@ from app.db.session import AsyncSessionLocal
 from app.registry.strategies import StrategyRegistry
 
 logger = logging.getLogger(__name__)
+
+
+def _json_safe(obj: Any) -> Any:
+    """Recursively convert non-JSON-serializable objects (Timestamps, ndarrays, etc.)."""
+    if isinstance(obj, list):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if hasattr(obj, 'isoformat'):  # datetime / Timestamp
+        return obj.isoformat()
+    if hasattr(obj, 'item'):  # numpy scalar
+        return obj.item()
+    return obj
+
 
 registry = StrategyRegistry()
 backtest_runner = BacktestRunner()
@@ -293,8 +307,8 @@ class ResearchLab:
             win_rate=metrics.win_rate,
             avg_rr=metrics.avg_rr,
             total_trades=metrics.total_trades,
-            equity_curve_json=json.dumps(metrics.equity_curve[-500:]),  # limit size
-            trades_json=json.dumps(metrics.trades[-200:]),
+            equity_curve_json=json.dumps(_json_safe(metrics.equity_curve[-500:])),
+            trades_json=json.dumps(_json_safe(metrics.trades[-200:])),
         )
         session.add(run)
         await session.flush()

@@ -112,11 +112,26 @@ async def _background_generate(asset: str, timeframe: str) -> None:
         logging.getLogger(__name__).error("Background signal error: %s", exc)
 
 
+async def _background_generate_all(timeframe: str) -> None:
+    from app.signals.engine import SignalEngine
+    engine = SignalEngine()
+    try:
+        await engine.generate_all_signals(timeframe=timeframe)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error("Background generate_all error: %s", exc)
+
+
 @router.post("/generate", status_code=202)
 async def trigger_signal_generation(
-    req: SignalGenerateRequest,
     background_tasks: BackgroundTasks,
+    req: Optional[SignalGenerateRequest] = None,
 ):
-    """Manually trigger signal generation for a specific asset."""
-    background_tasks.add_task(_background_generate, req.asset, req.timeframe)
-    return {"status": "accepted", "asset": req.asset, "timeframe": req.timeframe}
+    """Trigger signal generation. If asset is omitted generates for all configured assets."""
+    asset = req.asset if req and req.asset else None
+    timeframe = req.timeframe if req else "1h"
+    if asset:
+        background_tasks.add_task(_background_generate, asset, timeframe)
+    else:
+        background_tasks.add_task(_background_generate_all, timeframe)
+    return {"status": "accepted", "asset": asset or "ALL", "timeframe": timeframe}
