@@ -13,105 +13,149 @@
   "panels": [
     {
       "id": 1,
-      "title": "Signals Generated (total)",
+      "title": "Signals by Direction",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 },
       "targets": [
         {
-          "expr": "alpha_signals_total",
-          "legendFormat": "Total signals",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (direction) (alpha_factory_signals_total)",
+          "legendFormat": "{{direction}}",
           "refId": "A"
         }
       ],
-      "options": { "colorMode": "background", "graphMode": "area", "textMode": "auto" },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
       "fieldConfig": {
-        "defaults": { "color": { "mode": "thresholds" },
-          "thresholds": { "steps": [
-            { "color": "green", "value": null },
-            { "color": "yellow", "value": 10 },
-            { "color": "red", "value": 100 }
-          ]}
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 10 },
+              { "color": "orange", "value": 100 }
+            ]
+          }
         }
       }
     },
     {
       "id": 2,
-      "title": "LONG Signals",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "title": "Active Regime per Asset",
+      "type": "table",
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 },
       "targets": [
-        { "expr": "alpha_signals_long_total", "legendFormat": "LONG", "refId": "A" }
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "alpha_factory_requests_total",
+          "legendFormat": "{{endpoint}}",
+          "refId": "A",
+          "instant": true
+        }
       ],
+      "options": {
+        "footer": { "show": false },
+        "showHeader": true
+      },
       "fieldConfig": {
-        "defaults": { "color": { "fixedColor": "green", "mode": "fixed" } }
+        "defaults": { "custom": { "align": "auto" } }
       }
     },
     {
       "id": 3,
-      "title": "SHORT Signals",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "title": "Latest Backtest Sharpe by Strategy",
+      "type": "bargauge",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 },
       "targets": [
-        { "expr": "alpha_signals_short_total", "legendFormat": "SHORT", "refId": "A" }
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "alpha_factory_requests_total",
+          "legendFormat": "{{method}} {{endpoint}}",
+          "refId": "A",
+          "instant": true
+        }
       ],
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
       "fieldConfig": {
-        "defaults": { "color": { "fixedColor": "red", "mode": "fixed" } }
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 1.0 }
+            ]
+          }
+        }
       }
     },
     {
       "id": 4,
-      "title": "Active Strategies",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
-      "targets": [
-        { "expr": "alpha_strategies_active", "legendFormat": "Active", "refId": "A" }
-      ],
-      "fieldConfig": {
-        "defaults": { "color": { "fixedColor": "blue", "mode": "fixed" } }
-      }
-    },
-    {
-      "id": 5,
-      "title": "API Request Rate",
+      "title": "Backend Request Rate",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "targets": [
         {
-          "expr": "rate(http_requests_total[5m])",
-          "legendFormat": "{{method}} {{path}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 6,
-      "title": "Latest Backtest Sharpe by Strategy",
-      "type": "bargauge",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
-      "targets": [
-        {
-          "expr": "alpha_backtest_sharpe",
-          "legendFormat": "{{strategy}}",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(alpha_factory_requests_total[5m])",
+          "legendFormat": "{{method}} {{endpoint}} ({{status}})",
           "refId": "A"
         }
       ],
-      "options": { "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
       "fieldConfig": {
         "defaults": {
-          "thresholds": { "steps": [
-            { "color": "red", "value": null },
-            { "color": "yellow", "value": 0.5 },
-            { "color": "green", "value": 1.0 }
-          ]}
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          },
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Request Latency (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, rate(alpha_factory_request_latency_seconds_bucket[5m]))",
+          "legendFormat": "p95 {{endpoint}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "lineWidth": 2, "fillOpacity": 5 },
+          "color": { "mode": "palette-classic" }
         }
       }
     }
   ],
   "refresh": "30s",
   "schemaVersion": 38,
-  "tags": ["alpha-factory"],
+  "tags": ["alpha-factory", "trading", "signals"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
   "title": "Alpha Factory",
   "uid": "alpha-factory-v1",
   "version": 1
