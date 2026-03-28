@@ -99,7 +99,7 @@ services:
       - alpha-net
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "ls /app/main.py || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/metrics || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 5
