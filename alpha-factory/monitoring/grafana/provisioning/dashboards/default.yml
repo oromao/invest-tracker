@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: Alpha Factory
+    folder: Alpha Factory
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards
