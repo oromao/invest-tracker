@@ -220,6 +220,18 @@ class SignalEngine:
             await session.commit()
             await session.refresh(signal)
 
+            # Populate Qdrant vector store (best-effort — don't break signal gen if unavailable)
+            try:
+                await rag_store.store_state(
+                    asset=asset,
+                    timeframe=timeframe,
+                    timestamp=now,
+                    features=features,
+                    outcome=0.0,
+                )
+            except Exception as rag_exc:
+                logger.warning("RAG store_state failed (non-fatal): %s", rag_exc)
+
             logger.info(
                 "Generated signal for %s/%s: %s (conf=%.2f)",
                 asset,

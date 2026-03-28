@@ -105,14 +105,14 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # Funding rate delta
     if "funding_rate" in df.columns:
-        funding = df["funding_rate"].fillna(method="ffill")
+        funding = df["funding_rate"].ffill()
         feats["funding_delta"] = funding.diff(1)
     else:
         feats["funding_delta"] = np.nan
 
     # Open interest delta
     if "open_interest" in df.columns:
-        oi = df["open_interest"].fillna(method="ffill")
+        oi = df["open_interest"].ffill()
         prev_oi = oi.shift(1).replace(0, np.nan)
         feats["oi_delta"] = (oi - oi.shift(1)) / prev_oi
     else:

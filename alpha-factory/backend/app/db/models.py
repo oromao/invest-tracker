@@ -10,6 +10,7 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -53,6 +54,7 @@ class BarrierEnum(str, enum.Enum):
 class OHLCVBar(Base):
     __tablename__ = "ohlcv_bars"
     __table_args__ = (
+        Index('ix_ohlcv_asset_tf_ts', 'asset', 'timeframe', 'timestamp'),
         UniqueConstraint("asset", "timeframe", "timestamp", name="uq_ohlcv_asset_tf_ts"),
     )
 

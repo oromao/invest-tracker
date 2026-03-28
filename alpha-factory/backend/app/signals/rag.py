@@ -75,6 +75,40 @@ class RagStore:
 
     async def store_state(
         self,
+        asset: str,
+        timeframe: str,
+        timestamp,
+        features: Dict[str, float],
+        outcome: float = 0.0,
+    ) -> None:
+        await self.ensure_collection()
+        client = self._get_client()
+
+        vector_id = str(uuid.uuid4())
+        vec = embed_state(features)
+
+        payload = {
+            "asset": asset,
+            "timeframe": timeframe,
+            "trade_outcome": str(outcome),
+            "risk_reward": outcome,
+            "context_summary": "",
+            "regime": "",
+        }
+
+        client.upsert(
+            collection_name=settings.qdrant_collection,
+            points=[
+                qdrant_models.PointStruct(
+                    id=vector_id,
+                    vector=vec.tolist(),
+                    payload=payload,
+                )
+            ],
+        )
+
+    async def store_state_full(
+        self,
         session: AsyncSession,
         asset: str,
         timestamp,
@@ -84,6 +118,7 @@ class RagStore:
         trade_outcome: Optional[str] = None,
         risk_reward: Optional[float] = None,
     ) -> RagDocument:
+        """Full store_state that persists to both Qdrant and the RagDocument table."""
         await self.ensure_collection()
         client = self._get_client()
 
