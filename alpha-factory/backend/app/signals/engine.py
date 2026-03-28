@@ -138,14 +138,33 @@ class SignalEngine:
             regime_obj = await regime_detector.get_latest_regime(session, asset, timeframe)
             current_regime = regime_obj.regime.value if regime_obj else None
 
-            # 3. Get active strategy
+            # 3. Get active strategy (fallback chain: active → candidate → draft)
             active_strategies = await strategy_registry.get_active_strategies(session)
             active_strategy = active_strategies[0] if active_strategies else None
 
-            # If no active, try candidate
             if active_strategy is None:
                 candidates = await strategy_registry.get_candidates(session)
                 active_strategy = candidates[0] if candidates else None
+
+            # Fallback to any draft strategy matching the current regime
+            if active_strategy is None:
+                from sqlalchemy import select as sa_select
+                from app.db.models import StrategyStatusEnum
+                draft_stmt = sa_select(Strategy).where(
+                    Strategy.status == StrategyStatusEnum.draft
+                ).order_by(Strategy.created_at.desc()).limit(5)
+                draft_result = await session.execute(draft_stmt)
+                drafts = list(draft_result.scalars().all())
+                # Prefer a draft whose regime matches current_regime
+                for d in drafts:
+                    import json as _json
+                    p = _json.loads(d.params_json) if d.params_json else {}
+                    allowed = p.get("regime", [])
+                    if not allowed or not current_regime or current_regime in allowed:
+                        active_strategy = d
+                        break
+                if active_strategy is None and drafts:
+                    active_strategy = drafts[0]
 
             # 4. Generate raw direction from strategy logic
             direction, confidence = _apply_strategy_logic(features, active_strategy, current_regime)
@@ -154,8 +173,18 @@ class SignalEngine:
             similar_states = rag_store.retrieve_similar(features, top_k=3, asset_filter=asset)
             rag_context = rag_store.build_rag_context(similar_states)
 
-            # 6. Get entry price and ATR
+            # 6. Get entry price from latest OHLCV bar (features don't store close)
             entry_price = features.get("close", 0.0)
+            if entry_price == 0.0:
+                from sqlalchemy import select as _sa_select, desc as _desc
+                from app.db.models import OHLCVBar
+                bar_stmt = _sa_select(OHLCVBar).where(
+                    OHLCVBar.asset == asset, OHLCVBar.timeframe == timeframe
+                ).order_by(_desc(OHLCVBar.timestamp)).limit(1)
+                bar_result = await session.execute(bar_stmt)
+                latest_bar = bar_result.scalar_one_or_none()
+                if latest_bar:
+                    entry_price = latest_bar.close
             atr = features.get("atr_14", entry_price * 0.01 if entry_price > 0 else 100.0)
 
             tp1 = tp2 = sl = None

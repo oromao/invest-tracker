@@ -183,9 +183,9 @@ class RagStore:
                     ]
                 )
 
-            results = client.search(
+            results = client.query_points(
                 collection_name=settings.qdrant_collection,
-                query_vector=vec.tolist(),
+                query=vec.tolist(),
                 limit=top_k,
                 query_filter=query_filter,
                 with_payload=True,
@@ -194,14 +194,14 @@ class RagStore:
             return [
                 {
                     "score": hit.score,
-                    "asset": hit.payload.get("asset"),
-                    "regime": hit.payload.get("regime"),
-                    "trade_outcome": hit.payload.get("trade_outcome"),
-                    "risk_reward": hit.payload.get("risk_reward"),
-                    "context_summary": hit.payload.get("context_summary"),
+                    "asset": hit.payload.get("asset") if hit.payload else None,
+                    "regime": hit.payload.get("regime") if hit.payload else None,
+                    "trade_outcome": hit.payload.get("trade_outcome") if hit.payload else None,
+                    "risk_reward": hit.payload.get("risk_reward") if hit.payload else None,
+                    "context_summary": hit.payload.get("context_summary") if hit.payload else None,
                     "vector_id": hit.id,
                 }
-                for hit in results
+                for hit in results.points
             ]
         except Exception as exc:
             logger.error("RAG retrieve error: %s", exc)

@@ -65,14 +65,15 @@ def _compute_metrics_from_trades(
     sharpe = 0.0
     exit_dates = [t.get("exit_date") for t in trades if t.get("exit_date") is not None]
     if exit_dates:
-        min_date = min(exit_dates)
-        max_date = max(exit_dates)
+        # Normalize to tz-naive dates to avoid timezone comparison issues
+        min_date = pd.Timestamp(min(exit_dates)).normalize().tz_localize(None)
+        max_date = pd.Timestamp(max(exit_dates)).normalize().tz_localize(None)
         date_range = pd.date_range(start=min_date, end=max_date, freq="D")
         daily_returns = pd.Series(0.0, index=date_range)
         for t in trades:
             ed = t.get("exit_date")
             if ed is not None:
-                day = pd.Timestamp(ed).normalize()
+                day = pd.Timestamp(ed).normalize().tz_localize(None)
                 if day in daily_returns.index:
                     daily_returns[day] += t.get("pnl", 0.0)
         std = daily_returns.std()

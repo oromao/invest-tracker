@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List
 
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,8 +16,14 @@ class Settings(BaseSettings):
     binance_api_key: str = ""
     binance_api_secret: str = ""
 
-    assets_raw: str = "BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT"
-    timeframes_raw: str = "1m,5m,15m,1h,4h,1d"
+    assets_raw: str = Field(
+        default="BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT",
+        validation_alias=AliasChoices("ASSETS", "ASSETS_RAW", "assets_raw"),
+    )
+    timeframes_raw: str = Field(
+        default="1m,5m,15m,1h,4h,1d",
+        validation_alias=AliasChoices("TIMEFRAMES", "TIMEFRAMES_RAW", "timeframes_raw"),
+    )
 
     tb_pt: float = 0.02
     tb_sl: float = 0.01
@@ -37,11 +43,11 @@ class Settings(BaseSettings):
     ollama_model: str = "phi3:mini"
     llm_enabled: bool = True
 
-    @field_validator('cors_origins', mode='before')
+    @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors(cls, v):
         if isinstance(v, str):
-            return [s.strip() for s in v.split(',')]
+            return [s.strip() for s in v.split(",")]
         return v
 
     @property
@@ -51,14 +57,6 @@ class Settings(BaseSettings):
     @property
     def timeframes(self) -> List[str]:
         return [t.strip() for t in self.timeframes_raw.split(",") if t.strip()]
-
-    class Config:
-        env_prefix = ""
-        # Map ASSETS env var to assets_raw field
-        fields = {
-            "assets_raw": {"env": "ASSETS"},
-            "timeframes_raw": {"env": "TIMEFRAMES"},
-        }
 
 
 settings = Settings()

@@ -20,9 +20,11 @@ logger = logging.getLogger(__name__)
 class CCXTIngestor:
     def __init__(self) -> None:
         self.exchange: Optional[ccxt.binance] = None
+        self._closed: bool = False
 
     async def _get_exchange(self) -> ccxt.binance:
-        if self.exchange is None or self.exchange.closed:
+        if self.exchange is None or self._closed:
+            self._closed = False
             self.exchange = ccxt.binance(
                 {
                     "apiKey": settings.binance_api_key or None,
@@ -34,9 +36,14 @@ class CCXTIngestor:
         return self.exchange
 
     async def close(self) -> None:
-        if self.exchange and not self.exchange.closed:
-            await self.exchange.close()
-            self.exchange = None
+        if self.exchange and not self._closed:
+            try:
+                await self.exchange.close()
+            except Exception:
+                pass
+            finally:
+                self._closed = True
+                self.exchange = None
 
     async def fetch_ohlcv(
         self,

@@ -112,7 +112,7 @@ class BacktestRunRequest(BaseModel):
 
 
 class SignalGenerateRequest(BaseModel):
-    asset: str
+    asset: Optional[str] = None   # None → generate for all configured assets
     timeframe: str = "1h"
 
 
