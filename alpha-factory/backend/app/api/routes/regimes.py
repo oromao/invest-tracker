@@ -1,44 +1,77 @@
 from __future__ import annotations
-from typing import Optional
+
+import json
+from typing import List, Optional
+
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, desc, func
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.schemas import RegimeResponse
 from app.db.models import MarketRegime
 from app.db.session import get_db
-from app.api.schemas import RegimeOut
 
 router = APIRouter(prefix="/regimes", tags=["regimes"])
 
 
-@router.get("", response_model=list[RegimeOut])
-async def latest_regimes(db: AsyncSession = Depends(get_db)):
-    """Latest regime per asset (1h timeframe)."""
+def _regime_to_response(r: MarketRegime) -> RegimeResponse:
+    features = None
+    if r.features_json:
+        try:
+            features = json.loads(r.features_json)
+        except Exception:
+            pass
+    return RegimeResponse(
+        id=r.id,
+        asset=r.asset,
+        timeframe=r.timeframe,
+        timestamp=r.timestamp,
+        regime=r.regime.value if hasattr(r.regime, "value") else r.regime,
+        confidence=r.confidence,
+        features=features,
+        created_at=r.created_at,
+    )
+
+
+@router.get("", response_model=List[RegimeResponse])
+async def get_latest_regimes(
+    timeframe: str = "1h",
+    db: AsyncSession = Depends(get_db),
+):
+    """Latest regime per asset."""
     subq = (
         select(MarketRegime.asset, func.max(MarketRegime.timestamp).label("max_ts"))
-        .where(MarketRegime.timeframe == "1h")
+        .where(MarketRegime.timeframe == timeframe)
         .group_by(MarketRegime.asset)
         .subquery()
     )
-    q = select(MarketRegime).join(
+    stmt = select(MarketRegime).join(
         subq,
         (MarketRegime.asset == subq.c.asset) & (MarketRegime.timestamp == subq.c.max_ts),
     )
-    result = await db.execute(q)
-    return result.scalars().all()
+    result = await db.execute(stmt)
+    regimes = result.scalars().all()
+    return [_regime_to_response(r) for r in regimes]
 
 
-@router.get("/{asset}/history", response_model=list[RegimeOut])
-async def regime_history(
+@router.get("/{asset}/history", response_model=List[RegimeResponse])
+async def get_regime_history(
     asset: str,
     timeframe: str = "1h",
     limit: int = Query(100, le=500),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
+    """Regime history for a specific asset."""
+    asset_normalized = asset.replace("-", "/").upper()
+    stmt = (
         select(MarketRegime)
-        .where(MarketRegime.asset == asset.upper(), MarketRegime.timeframe == timeframe)
+        .where(
+            MarketRegime.asset == asset_normalized,
+            MarketRegime.timeframe == timeframe,
+        )
         .order_by(desc(MarketRegime.timestamp))
         .limit(limit)
     )
-    return result.scalars().all()
+    result = await db.execute(stmt)
+    regimes = result.scalars().all()
+    return [_regime_to_response(r) for r in regimes]
