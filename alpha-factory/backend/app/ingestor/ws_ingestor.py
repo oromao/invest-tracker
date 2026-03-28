@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 import websockets
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db.models import OHLCVBar
@@ -123,7 +125,95 @@ class BinanceWSIngestor:
             await session.execute(stmt)
             await session.commit()
 
+            try:
+                await self._aggregate_higher_timeframes(session, asset, bar)
+            except Exception as exc:
+                logger.error("Higher TF aggregation error for %s: %s", asset, exc)
+
         logger.debug("WS upserted 1m bar for %s at %s", asset, ts)
+
+    async def _aggregate_higher_timeframes(self, db: AsyncSession, asset: str, bar_1m: dict) -> None:
+        """Aggregate 1m bars into higher timeframes (5m, 15m, 1h, 4h, 1d) when a TF boundary is reached."""
+        ts: datetime = bar_1m["timestamp"]
+
+        # (timeframe_label, num_1m_bars, boundary_check_fn)
+        tf_configs = [
+            ("5m",  5,    lambda t: t.minute % 5 == 4),
+            ("15m", 15,   lambda t: t.minute % 15 == 14),
+            ("1h",  60,   lambda t: t.minute == 59),
+            ("4h",  240,  lambda t: t.hour % 4 == 3 and t.minute == 59),
+            ("1d",  1440, lambda t: t.hour == 23 and t.minute == 59),
+        ]
+
+        for tf_label, n_bars, boundary_check in tf_configs:
+            if not boundary_check(ts):
+                continue
+
+            # Query the last N 1m bars for this asset (ordered ascending)
+            stmt = (
+                select(OHLCVBar)
+                .where(OHLCVBar.asset == asset, OHLCVBar.timeframe == "1m")
+                .order_by(OHLCVBar.timestamp.desc())
+                .limit(n_bars)
+            )
+            result = await db.execute(stmt)
+            rows = result.scalars().all()
+
+            if len(rows) < n_bars:
+                logger.debug("Not enough 1m bars to aggregate %s for %s (have %d, need %d)", tf_label, asset, len(rows), n_bars)
+                continue
+
+            # Rows are desc; reverse to ascending order
+            rows_asc = list(reversed(rows))
+
+            agg_open = rows_asc[0].open
+            agg_high = max(r.high for r in rows_asc)
+            agg_low = min(r.low for r in rows_asc)
+            agg_close = rows_asc[-1].close
+            agg_volume = sum(r.volume for r in rows_asc)
+
+            fr_values = [r.funding_rate for r in rows_asc if r.funding_rate is not None]
+            agg_funding_rate = sum(fr_values) / len(fr_values) if fr_values else None
+
+            oi_values = [r.open_interest for r in rows_asc if r.open_interest is not None]
+            agg_open_interest = sum(oi_values) / len(oi_values) if oi_values else None
+
+            # Use the timestamp of the first bar in the window as the TF bar timestamp
+            agg_ts = rows_asc[0].timestamp
+
+            agg_bar = {
+                "asset": asset,
+                "timeframe": tf_label,
+                "timestamp": agg_ts,
+                "open": agg_open,
+                "high": agg_high,
+                "low": agg_low,
+                "close": agg_close,
+                "volume": agg_volume,
+                "funding_rate": agg_funding_rate,
+                "open_interest": agg_open_interest,
+                "mark_price": None,
+            }
+
+            upsert_stmt = (
+                pg_insert(OHLCVBar)
+                .values([agg_bar])
+                .on_conflict_do_update(
+                    constraint="uq_ohlcv_asset_tf_ts",
+                    set_={
+                        "open": pg_insert(OHLCVBar).excluded.open,
+                        "high": pg_insert(OHLCVBar).excluded.high,
+                        "low": pg_insert(OHLCVBar).excluded.low,
+                        "close": pg_insert(OHLCVBar).excluded.close,
+                        "volume": pg_insert(OHLCVBar).excluded.volume,
+                        "funding_rate": pg_insert(OHLCVBar).excluded.funding_rate,
+                        "open_interest": pg_insert(OHLCVBar).excluded.open_interest,
+                    },
+                )
+            )
+            await db.execute(upsert_stmt)
+            await db.commit()
+            logger.debug("Aggregated %s bar for %s at %s", tf_label, asset, agg_ts)
 
     def _normalize_symbol(self, raw: str) -> Optional[str]:
         """Convert 'BTCUSDT' to 'BTC/USDT' by matching against settings.assets."""

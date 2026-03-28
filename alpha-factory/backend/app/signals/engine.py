@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import DirectionEnum, Signal, Strategy, StrategyStatusEnum
 from app.db.session import AsyncSessionLocal
 from app.features.engine import FeatureEngine
+from app.llm.client import generate_signal_narrative
 from app.regime.detector import RegimeDetector
 from app.registry.strategies import StrategyRegistry
 from app.risk.engine import PortfolioState, RiskEngine, SignalInput
@@ -181,23 +182,17 @@ class SignalEngine:
                     direction = DirectionEnum.NO_TRADE
                     confidence = 0.0
 
-            # 8. Build explanation
-            explanation_parts = [
-                f"Asset: {asset} | Timeframe: {timeframe}",
-                f"Regime: {current_regime or 'unknown'}",
-                f"Direction: {direction.value} | Confidence: {confidence:.2%}",
-            ]
-            if active_strategy:
-                explanation_parts.append(f"Strategy: {active_strategy.name}")
-            if features:
-                rsi_val = features.get("rsi_14", 0)
-                macd_val = features.get("macd_hist", 0)
-                explanation_parts.append(f"RSI(14)={rsi_val:.1f}, MACD_hist={macd_val:.4f}")
-            if similar_states:
-                outcomes = [s.get("trade_outcome", "?") for s in similar_states[:2]]
-                explanation_parts.append(f"Similar past outcomes: {', '.join(outcomes)}")
-
-            explanation = " | ".join(explanation_parts)
+            # 8. Build explanation via LLM (phi3:mini via Ollama), fallback to template
+            explanation = await generate_signal_narrative(
+                asset=asset,
+                timeframe=timeframe,
+                direction=direction.value,
+                confidence=confidence,
+                regime=current_regime,
+                features=features,
+                similar_past=similar_states or [],
+                strategy_name=active_strategy.name if active_strategy else None,
+            )
 
             # 9. Store signal
             now = datetime.now(tz=timezone.utc)
@@ -219,6 +214,18 @@ class SignalEngine:
             session.add(signal)
             await session.commit()
             await session.refresh(signal)
+
+            # Populate Qdrant vector store (best-effort — don't break signal gen if unavailable)
+            try:
+                await rag_store.store_state(
+                    asset=asset,
+                    timeframe=timeframe,
+                    timestamp=now,
+                    features=features,
+                    outcome=0.0,
+                )
+            except Exception as rag_exc:
+                logger.warning("RAG store_state failed (non-fatal): %s", rag_exc)
 
             logger.info(
                 "Generated signal for %s/%s: %s (conf=%.2f)",

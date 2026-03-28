@@ -87,6 +87,54 @@ async def update_strategy_status(
     return _strat_to_response(strat)
 
 
+@router.patch("/strategies/{strategy_id}/promote", response_model=StrategyResponse)
+async def promote_strategy(
+    strategy_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Promote a strategy through the lifecycle: draft → candidate → active."""
+    result = await db.execute(select(Strategy).where(Strategy.strategy_id == strategy_id))
+    strat = result.scalar_one_or_none()
+    if strat is None:
+        raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
+
+    transitions = {
+        StrategyStatusEnum.draft: StrategyStatusEnum.candidate,
+        StrategyStatusEnum.candidate: StrategyStatusEnum.active,
+    }
+    current_status = strat.status if isinstance(strat.status, StrategyStatusEnum) else StrategyStatusEnum(strat.status)
+    next_status = transitions.get(current_status)
+    if next_status is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot promote strategy in status '{current_status.value}'. Valid source statuses: draft, candidate.",
+        )
+
+    strat.status = next_status
+    db.add(strat)
+    await db.commit()
+    await db.refresh(strat)
+    return _strat_to_response(strat)
+
+
+@router.patch("/strategies/{strategy_id}/deprecate", response_model=StrategyResponse)
+async def deprecate_strategy(
+    strategy_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Deprecate a strategy (any status can be deprecated)."""
+    result = await db.execute(select(Strategy).where(Strategy.strategy_id == strategy_id))
+    strat = result.scalar_one_or_none()
+    if strat is None:
+        raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
+
+    strat.status = StrategyStatusEnum.deprecated
+    db.add(strat)
+    await db.commit()
+    await db.refresh(strat)
+    return _strat_to_response(strat)
+
+
 async def _background_research(asset: str, timeframe: str) -> None:
     from app.research.lab import ResearchLab
 

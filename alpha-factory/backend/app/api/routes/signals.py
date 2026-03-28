@@ -1,17 +1,26 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import List, Optional
 
+import redis.asyncio as aioredis
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import SignalGenerateRequest, SignalResponse
+from app.config import settings
 from app.db.models import Signal
 from app.db.session import get_db
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/signals", tags=["signals"])
+
+redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
+
+_SIGNALS_CACHE_KEY = "alpha:signals:latest"
+_SIGNALS_CACHE_TTL = 30  # seconds
 
 
 def _signal_to_response(s: Signal) -> SignalResponse:
@@ -39,7 +48,15 @@ async def list_latest_signals(
     limit: int = Query(50, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    """List the latest signals (one per asset, most recent first)."""
+    """List the latest signals (one per asset, most recent first). Response is cached in Redis for 30s."""
+    # Try Redis cache first
+    try:
+        cached = await redis_client.get(_SIGNALS_CACHE_KEY)
+        if cached is not None:
+            return json.loads(cached)
+    except Exception as exc:
+        logger.warning("Redis GET failed (non-fatal): %s", exc)
+
     subq = (
         select(Signal.asset, func.max(Signal.timestamp).label("max_ts"))
         .group_by(Signal.asset)
@@ -51,7 +68,16 @@ async def list_latest_signals(
     ).order_by(desc(Signal.timestamp)).limit(limit)
     result = await db.execute(stmt)
     signals = result.scalars().all()
-    return [_signal_to_response(s) for s in signals]
+    response_data = [_signal_to_response(s) for s in signals]
+
+    # Populate cache
+    try:
+        serialized = json.dumps([r.model_dump(mode="json") for r in response_data])
+        await redis_client.set(_SIGNALS_CACHE_KEY, serialized, ex=_SIGNALS_CACHE_TTL)
+    except Exception as exc:
+        logger.warning("Redis SET failed (non-fatal): %s", exc)
+
+    return response_data
 
 
 @router.get("/{asset}", response_model=List[SignalResponse])

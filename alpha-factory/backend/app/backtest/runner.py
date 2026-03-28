@@ -59,12 +59,30 @@ def _compute_metrics_from_trades(
     drawdowns = (equity_arr - running_max) / running_max
     max_drawdown = float(abs(drawdowns.min()))
 
-    # Sharpe ratio (annualized, assuming daily returns)
-    pnl_arr = np.array(pnls)
-    if pnl_arr.std() > 0:
-        sharpe = float((pnl_arr.mean() / pnl_arr.std()) * np.sqrt(252))
+    # Annualized Sharpe ratio using daily returns series.
+    # Build a date-indexed series with 0.0 for every calendar day in the backtest range,
+    # then add each trade's PnL to its exit date bucket.
+    sharpe = 0.0
+    exit_dates = [t.get("exit_date") for t in trades if t.get("exit_date") is not None]
+    if exit_dates:
+        min_date = min(exit_dates)
+        max_date = max(exit_dates)
+        date_range = pd.date_range(start=min_date, end=max_date, freq="D")
+        daily_returns = pd.Series(0.0, index=date_range)
+        for t in trades:
+            ed = t.get("exit_date")
+            if ed is not None:
+                day = pd.Timestamp(ed).normalize()
+                if day in daily_returns.index:
+                    daily_returns[day] += t.get("pnl", 0.0)
+        std = daily_returns.std()
+        if std > 0:
+            sharpe = float((daily_returns.mean() / std) * np.sqrt(252))
     else:
-        sharpe = 0.0
+        # Fallback when exit_date is not present: treat each trade PnL as a daily return period
+        pnl_arr = np.array(pnls)
+        if pnl_arr.std() > 0:
+            sharpe = float((pnl_arr.mean() / pnl_arr.std()) * np.sqrt(252))
 
     return BacktestMetrics(
         sharpe=round(sharpe, 4),
@@ -168,6 +186,7 @@ def run_backtest_pandas(
                     rr = -rr
 
                 capital += pnl
+                exit_ts = close.index[i] if hasattr(close.index[i], "date") else None
                 trades.append(
                     {
                         "entry_idx": entry_idx,
@@ -178,6 +197,7 @@ def run_backtest_pandas(
                         "pnl": float(pnl),
                         "rr": float(rr),
                         "outcome": outcome,
+                        "exit_date": exit_ts,
                     }
                 )
                 in_trade = False
