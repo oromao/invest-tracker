@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -51,6 +52,8 @@ async def get_latest_regimes(
     )
     result = await db.execute(stmt)
     regimes = result.scalars().all()
+    if not regimes:
+        return []
     return [_regime_to_response(r) for r in regimes]
 
 

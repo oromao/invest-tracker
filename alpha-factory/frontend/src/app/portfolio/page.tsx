@@ -5,88 +5,84 @@ import { Card, CardTitle, CardValue } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { SkeletonCard, SkeletonRow } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
+import { fetchPortfolio } from '@/utils/api'
 
 interface Position {
-  id: string
+  id?: string
   asset: string
-  side: 'LONG' | 'SHORT'
+  side?: 'LONG' | 'SHORT'
+  direction?: string
   size: number
   entry_price: number
-  current_price: number
-  pnl_usd: number
+  current_price?: number
+  pnl_usd?: number
+  pnl?: number
   pnl_pct: number
   last_signal_id?: string
 }
 
 interface PortfolioSummary {
   total_value: number
-  open_pnl: number
+  cash?: number
+  invested?: number
+  open_pnl?: number
+  total_pnl?: number
   daily_pnl: number
-  active_positions: number
+  active_positions?: number
+  total_pnl_pct?: number
+  daily_pnl_pct?: number
+  timestamp?: string
   positions: Position[]
 }
 
-const MOCK_PORTFOLIO: PortfolioSummary = {
-  total_value: 125430.5,
-  open_pnl: 3420.8,
-  daily_pnl: 1250.3,
-  active_positions: 3,
-  positions: [
-    {
-      id: '1',
-      asset: 'BTC/USDT',
-      side: 'LONG',
-      size: 0.5,
-      entry_price: 65000,
-      current_price: 67450,
-      pnl_usd: 1225.0,
-      pnl_pct: 3.77,
-      last_signal_id: 'sig_001',
-    },
-    {
-      id: '2',
-      asset: 'ETH/USDT',
-      side: 'LONG',
-      size: 4.2,
-      entry_price: 3400,
-      current_price: 3520,
-      pnl_usd: 504.0,
-      pnl_pct: 3.53,
-      last_signal_id: 'sig_002',
-    },
-    {
-      id: '3',
-      asset: 'SOL/USDT',
-      side: 'SHORT',
-      size: 50,
-      entry_price: 155,
-      current_price: 148.5,
-      pnl_usd: 325.0,
-      pnl_pct: 4.19,
-      last_signal_id: 'sig_003',
-    },
-  ],
+function normalizePosition(p: Position): Position & { pnl_usd: number; side: 'LONG' | 'SHORT' } {
+  return {
+    ...p,
+    pnl_usd: p.pnl_usd ?? p.pnl ?? 0,
+    side: (p.side ?? (p.direction as 'LONG' | 'SHORT') ?? 'LONG'),
+    current_price: p.current_price ?? p.entry_price,
+  }
 }
 
-async function fetchPortfolio(): Promise<PortfolioSummary> {
-  const res = await fetch('/api/portfolio')
-  if (!res.ok) throw new Error('Failed to fetch portfolio')
-  return res.json()
+function normalizePortfolio(p: PortfolioSummary): PortfolioSummary & { open_pnl: number; active_positions: number } {
+  return {
+    ...p,
+    open_pnl: p.open_pnl ?? p.total_pnl ?? 0,
+    active_positions: p.active_positions ?? p.positions.length,
+  }
 }
 
 function formatBRL(n: number): string {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n)
 }
 
+function normalizePercent(value: number): number {
+  return Math.abs(value) <= 1 ? value * 100 : value
+}
+
 export default function PortfolioPage() {
-  const { data: portfolio, isLoading, isError } = useQuery<PortfolioSummary>({
+  const { data: rawPortfolio, isLoading, isError } = useQuery<PortfolioSummary>({
     queryKey: ['portfolio'],
     queryFn: fetchPortfolio,
-    placeholderData: MOCK_PORTFOLIO,
     refetchInterval: 15_000,
   })
 
-  const display = portfolio ?? MOCK_PORTFOLIO
+  const display = normalizePortfolio(
+    rawPortfolio ?? {
+      total_value: 0,
+      cash: 0,
+      invested: 0,
+      open_pnl: 0,
+      daily_pnl: 0,
+      daily_pnl_pct: 0,
+      total_pnl: 0,
+      total_pnl_pct: 0,
+      active_positions: 0,
+      positions: [],
+      timestamp: new Date().toISOString(),
+    }
+  )
+  const positions = display.positions.map(normalizePosition)
 
   return (
     <div className="space-y-6">
@@ -98,7 +94,7 @@ export default function PortfolioPage() {
 
       {isError && (
         <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
-          Failed to fetch portfolio from API — showing mock data.
+          Failed to fetch portfolio from API — showing empty state.
         </div>
       )}
 
@@ -168,7 +164,7 @@ export default function PortfolioPage() {
             <tbody>
               {isLoading ? (
                 Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} />)
-              ) : display.positions.length === 0 ? (
+              ) : positions.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-4 py-16 text-center">
                     <div className="flex flex-col items-center gap-3 text-white/30">
@@ -185,10 +181,10 @@ export default function PortfolioPage() {
                   </td>
                 </tr>
               ) : (
-                display.positions.map((pos) => {
+                positions.map((pos, idx) => {
                   const isPnlPositive = pos.pnl_usd >= 0
                   return (
-                    <tr key={pos.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                    <tr key={pos.id ?? idx} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
                       <td className="px-4 py-3 font-medium text-white">{pos.asset}</td>
                       <td className="px-4 py-3">
                         {pos.side === 'LONG' ? (
@@ -202,13 +198,13 @@ export default function PortfolioPage() {
                         {pos.entry_price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                       </td>
                       <td className="px-4 py-3 text-right text-white tabular-nums">
-                        {pos.current_price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        {pos.current_price!.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                       </td>
                       <td className={cn('px-4 py-3 text-right tabular-nums font-medium', isPnlPositive ? 'text-emerald-400' : 'text-red-400')}>
                         {isPnlPositive ? '+' : ''}{formatBRL(pos.pnl_usd)}
                       </td>
                       <td className={cn('px-4 py-3 text-right tabular-nums font-medium', isPnlPositive ? 'text-emerald-400' : 'text-red-400')}>
-                        {isPnlPositive ? '+' : ''}{pos.pnl_pct.toFixed(2)}%
+                        {isPnlPositive ? '+' : ''}{normalizePercent(pos.pnl_pct).toFixed(2)}%
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-white/30">
                         {pos.last_signal_id ?? '—'}

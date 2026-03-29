@@ -1,5 +1,3 @@
-version: "3.9"
-
 # ─────────────────────────────────────────────────────────────────────────────
 #  ALPHA FACTORY — Lightweight Production Compose
 #
@@ -9,9 +7,9 @@ version: "3.9"
 #  + RAG vector context:
 #    docker compose --profile rag up -d
 #
-#  + LLM signal narratives (Ollama phi3:mini, needs ~4 GB RAM):
+#  + LLM signal narratives (optional, needs ~4 GB RAM if enabled):
 #    docker compose --profile ai up -d
-#    (also set LLM_ENABLED=true in .env)
+#    (also set AI_ENABLED=true and AI_PROVIDER=ollama in .env)
 #
 #  + Web UI:
 #    docker compose --profile ui up -d
@@ -81,8 +79,9 @@ services:
     env_file:
       - .env
     environment:
-      # LLM disabled by default; set LLM_ENABLED=true in .env when using --profile ai
-      LLM_ENABLED: "${LLM_ENABLED:-false}"
+      # AI is disabled by default; enable explicitly with AI_ENABLED=true
+      AI_ENABLED: "${AI_ENABLED:-false}"
+      AI_PROVIDER: "${AI_PROVIDER:-none}"
     depends_on:
       postgres:
         condition: service_healthy

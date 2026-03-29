@@ -85,7 +85,46 @@ class Settings(BaseSettings):
 
     ollama_url: str = "http://ollama:11434"
     ollama_model: str = "phi3:mini"
-    llm_enabled: bool = True
+    ai_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("AI_ENABLED", "LLM_ENABLED", "llm_enabled"),
+    )
+    ai_provider: str = Field(
+        default="none",
+        validation_alias=AliasChoices("AI_PROVIDER", "ai_provider"),
+    )
+    ai_timeout_seconds: float = Field(
+        default=15.0,
+        validation_alias=AliasChoices("AI_TIMEOUT_SECONDS", "ai_timeout_seconds"),
+    )
+    ai_retries: int = Field(
+        default=2,
+        validation_alias=AliasChoices("AI_RETRIES", "ai_retries"),
+    )
+    ai_model: str = Field(
+        default="phi3:mini",
+        validation_alias=AliasChoices("AI_MODEL", "ai_model"),
+    )
+    deepseek_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("DEEPSEEK_API_KEY", "deepseek_api_key"),
+    )
+    gemini_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("GEMINI_API_KEY", "gemini_api_key"),
+    )
+    openrouter_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("OPENROUTER_API_KEY", "openrouter_api_key"),
+    )
+    groq_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("GROQ_API_KEY", "groq_api_key"),
+    )
+
+    @property
+    def llm_enabled(self) -> bool:
+        return self.ai_enabled
 
     @field_validator("cors_origins", mode="before")
     @classmethod

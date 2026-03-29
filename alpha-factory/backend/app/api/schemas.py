@@ -79,23 +79,28 @@ class RegimeResponse(BaseModel):
 
 
 class PortfolioPosition(BaseModel):
+    id: Optional[int] = None
     asset: str
+    side: str
     direction: str
     entry_price: float
     current_price: float
     size: float
     pnl: float
     pnl_pct: float
+    last_signal_id: Optional[str] = None
 
 
 class PortfolioResponse(BaseModel):
     total_value: float
     cash: float
     invested: float
+    open_pnl: Optional[float] = None
     daily_pnl: float
     daily_pnl_pct: float
     total_pnl: float
     total_pnl_pct: float
+    active_positions: Optional[int] = None
     positions: List[PortfolioPosition]
     timestamp: datetime
 

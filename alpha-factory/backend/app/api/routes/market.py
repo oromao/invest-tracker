@@ -47,11 +47,11 @@ async def get_market_regime(
         )
 
     # Convert to response
-    market_features = None
-    if regime_data.market_features_json:
+    features = None
+    if regime_data.features_json:
         try:
-            market_features = json.loads(regime_data.market_features_json)
-        except:
+            features = json.loads(regime_data.features_json)
+        except Exception:
             pass
             
     return RegimeResponse(
@@ -61,6 +61,6 @@ async def get_market_regime(
         timestamp=regime_data.timestamp,
         regime=regime_data.regime.value,
         confidence=regime_data.confidence,
-        market_features=market_features,
-        created_at=regime_data.created_at
+        features=features,
+        created_at=regime_data.created_at,
     )

@@ -1,11 +1,13 @@
-"""
-LLM client — uses local Ollama (phi3:mini) via OpenAI-compatible API.
-Falls back gracefully to template-based explanation if Ollama is unavailable.
+"""Optional AI client with safe fallbacks.
+
+AI is opt-in. When disabled or unavailable, the runtime must continue with
+deterministic template-based narratives.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from openai import AsyncOpenAI
 
@@ -13,17 +15,52 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_client: Optional[AsyncOpenAI] = None
+_CLIENTS: dict[Tuple[str, str], AsyncOpenAI] = {}
 
 
-def get_client() -> AsyncOpenAI:
-    global _client
-    if _client is None:
-        _client = AsyncOpenAI(
-            base_url=f"{settings.ollama_url}/v1",
-            api_key="ollama",  # Ollama doesn't need a real key
+def _provider_config() -> tuple[str, str, str]:
+    provider = (settings.ai_provider or "none").strip().lower()
+    if not settings.ai_enabled or provider in {"", "none", "off", "disabled"}:
+        return "none", "", ""
+
+    if provider == "ollama":
+        return provider, f"{settings.ollama_url}/v1", "ollama"
+    if provider == "deepseek":
+        return provider, "https://api.deepseek.com/v1", settings.deepseek_api_key
+    if provider == "gemini":
+        return provider, "https://generativelanguage.googleapis.com/v1beta/openai/", settings.gemini_api_key
+    if provider == "openrouter":
+        return provider, "https://openrouter.ai/api/v1", settings.openrouter_api_key
+    if provider == "groq":
+        return provider, "https://api.groq.com/openai/v1", settings.groq_api_key
+
+    logger.warning("Unknown AI provider '%s'; falling back to template mode.", provider)
+    return "none", "", ""
+
+
+def get_client(provider: str, base_url: str, api_key: str) -> AsyncOpenAI:
+    key = (provider, base_url)
+    client = _CLIENTS.get(key)
+    if client is None:
+        client = AsyncOpenAI(
+            base_url=base_url,
+            api_key=api_key or "dummy",
+            timeout=settings.ai_timeout_seconds,
         )
-    return _client
+        _CLIENTS[key] = client
+    return client
+
+
+def _provider_model(provider: str) -> str:
+    if provider == "deepseek":
+        return settings.ai_model or "deepseek-chat"
+    if provider == "gemini":
+        return settings.ai_model or "gemini-2.0-flash"
+    if provider == "openrouter":
+        return settings.ai_model or "openai/gpt-4o-mini"
+    if provider == "groq":
+        return settings.ai_model or "llama-3.1-70b-versatile"
+    return settings.ai_model or settings.ollama_model
 
 
 async def generate_signal_narrative(
@@ -37,10 +74,11 @@ async def generate_signal_narrative(
     strategy_name: Optional[str],
 ) -> str:
     """
-    Generate a human-readable narrative for a trading signal using phi3:mini.
-    Returns a fallback string if Ollama is unavailable or disabled.
+    Generate a human-readable narrative for a trading signal.
+    Returns a fallback string if AI is disabled or unavailable.
     """
-    if not settings.llm_enabled:
+    provider, base_url, api_key = _provider_config()
+    if provider == "none":
         return _template_fallback(asset, direction, confidence, regime, features)
 
     rsi = features.get("rsi_14", 0.0)
@@ -66,20 +104,35 @@ Estratégia ativa: {strategy_name or "padrão"}
 
 Explicação:"""
 
-    try:
-        client = get_client()
-        response = await client.chat.completions.create(
-            model=settings.ollama_model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=120,
-        )
-        narrative = response.choices[0].message.content.strip()
-        logger.debug("LLM narrative for %s: %s", asset, narrative)
-        return narrative
-    except Exception as exc:
-        logger.warning("Ollama unavailable, using template fallback: %s", exc)
-        return _template_fallback(asset, direction, confidence, regime, features)
+    model = _provider_model(provider)
+    client = get_client(provider, base_url, api_key)
+
+    last_exc: Exception | None = None
+    for attempt in range(max(1, settings.ai_retries + 1)):
+        try:
+            response = await asyncio.wait_for(
+                client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=120,
+                ),
+                timeout=settings.ai_timeout_seconds,
+            )
+            narrative = (response.choices[0].message.content or "").strip()
+            if narrative:
+                logger.debug("AI narrative via %s for %s: %s", provider, asset, narrative)
+                return narrative
+        except Exception as exc:
+            last_exc = exc
+            if attempt < settings.ai_retries:
+                await asyncio.sleep(min(0.5 * (attempt + 1), 2.0))
+                continue
+            break
+
+    if last_exc:
+        logger.warning("AI provider %s unavailable, using template fallback: %s", provider, last_exc)
+    return _template_fallback(asset, direction, confidence, regime, features)
 
 
 def _template_fallback(
