@@ -40,3 +40,7 @@ next-env.d.ts
 
 # prisma
 prisma/migrations/
+
+# Qdrant local runtime data
+storage/
+.qdrant-initialized
