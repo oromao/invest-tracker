@@ -415,7 +415,7 @@ class SignalEngine:
                     outcome=0.0,
                 )
             except Exception as rag_exc:
-                logger.warning("RAG store_state failed (non-fatal): %s", rag_exc)
+                logger.debug("RAG store_state skipped (Qdrant unavailable): %s", rag_exc)
 
             logger.info(
                 "Signal %s/%s: %s conf=%.3f entry=%.4f",
