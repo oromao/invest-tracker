@@ -181,15 +181,26 @@ class RegimeDetector:
                 col: float(pivot.iloc[-1][col]) for col in pivot.columns
             }
 
-            regime_row = MarketRegime(
-                asset=asset,
-                timeframe=timeframe,
-                timestamp=current_ts,
-                regime=current_regime,
-                confidence=confidence,
-                features_json=json.dumps(features_snapshot),
+            stmt = (
+                pg_insert(MarketRegime)
+                .values(
+                    asset=asset,
+                    timeframe=timeframe,
+                    timestamp=current_ts,
+                    regime=current_regime,
+                    confidence=confidence,
+                    features_json=json.dumps(features_snapshot),
+                )
+                .on_conflict_do_update(
+                    constraint="uq_regime_asset_tf_ts",
+                    set_={
+                        "regime": current_regime,
+                        "confidence": confidence,
+                        "features_json": json.dumps(features_snapshot),
+                    },
+                )
             )
-            session.add(regime_row)
+            await session.execute(stmt)
             await session.commit()
 
             logger.info(
