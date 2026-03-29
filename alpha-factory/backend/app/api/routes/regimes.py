@@ -40,14 +40,14 @@ async def get_latest_regimes(
 ):
     """Latest regime per asset."""
     subq = (
-        select(MarketRegime.asset, func.max(MarketRegime.timestamp).label("max_ts"))
+        select(MarketRegime.asset, func.max(MarketRegime.id).label("max_id"))
         .where(MarketRegime.timeframe == timeframe)
         .group_by(MarketRegime.asset)
         .subquery()
     )
     stmt = select(MarketRegime).join(
         subq,
-        (MarketRegime.asset == subq.c.asset) & (MarketRegime.timestamp == subq.c.max_ts),
+        MarketRegime.id == subq.c.max_id,
     )
     result = await db.execute(stmt)
     regimes = result.scalars().all()

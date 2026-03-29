@@ -103,18 +103,21 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     vol_std = volume.rolling(20, min_periods=20).std().replace(0, np.nan)
     feats["volume_zscore"] = (volume - vol_mean) / vol_std
 
-    # Funding rate delta
+    # Funding rate delta (None → NaN antes de diff)
     if "funding_rate" in df.columns:
-        funding = df["funding_rate"].ffill()
-        feats["funding_delta"] = funding.diff(1)
+        funding = pd.to_numeric(df["funding_rate"], errors="coerce").ffill()
+        feats["funding_delta"] = funding.diff(1) if funding.notna().any() else np.nan
     else:
         feats["funding_delta"] = np.nan
 
     # Open interest delta (fractional change)
     if "open_interest" in df.columns:
-        oi = df["open_interest"].ffill()
-        prev_oi = oi.shift(1).replace(0, np.nan)
-        feats["oi_delta"] = (oi - oi.shift(1)) / prev_oi
+        oi = pd.to_numeric(df["open_interest"], errors="coerce").ffill()
+        if oi.notna().any():
+            prev_oi = oi.shift(1).replace(0, np.nan)
+            feats["oi_delta"] = (oi - oi.shift(1)) / prev_oi
+        else:
+            feats["oi_delta"] = np.nan
     else:
         feats["oi_delta"] = np.nan
 
