@@ -424,21 +424,31 @@ class SignalEngine:
             return signal
 
     async def generate_all_signals(self, timeframe: str = "1h") -> List[Signal]:
-        signals = []
-        
-        async with async_session_factory() as session:
-            portfolio_state = await self._fetch_portfolio_state(session)
-            logger.info(
-                "Starting signal generation for %s. Portfolio: Exposure=%.2f%% Open=%d",
-                timeframe, portfolio_state.total_exposure * 100, len(portfolio_state.open_positions)
-            )
+        from app.execution.paper_trader import load_portfolio_state_from_redis
 
-            for asset in settings.assets:
-                try:
-                    # Note: generate_signal creates its own session, but we pass portfolio_state
-                    sig = await self.generate_signal(asset, timeframe, portfolio_state)
-                    signals.append(sig)
-                except Exception as exc:
-                    logger.error("Error generating signal %s/%s: %s", asset, timeframe, exc)
+        signals = []
+        # Carrega estado real do portfolio do Redis (paper trader) para que o
+        # risk engine respeite limites de exposição live. Fallback para DB.
+        try:
+            portfolio_state = await load_portfolio_state_from_redis()
+        except Exception as exc:
+            logger.warning("Redis portfolio state indisponível: %s — usando DB", exc)
+            try:
+                async with async_session_factory() as session:
+                    portfolio_state = await self._fetch_portfolio_state(session)
+            except Exception:
+                portfolio_state = PortfolioState()
+
+        logger.info(
+            "Gerando sinais para %s. Portfolio: Exposição=%.2f%% Posições=%d",
+            timeframe, portfolio_state.total_exposure * 100, len(portfolio_state.open_positions),
+        )
+
+        for asset in settings.assets:
+            try:
+                sig = await self.generate_signal(asset, timeframe, portfolio_state)
+                signals.append(sig)
+            except Exception as exc:
+                logger.error("Error generating signal %s/%s: %s", asset, timeframe, exc)
 
         return signals

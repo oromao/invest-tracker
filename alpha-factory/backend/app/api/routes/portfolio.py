@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from typing import List
 
 import httpx
+import redis.asyncio as aioredis
 from fastapi import APIRouter
 
 from app.api.schemas import PortfolioPosition, PortfolioResponse
@@ -13,44 +15,64 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
-# Mock portfolio data — the real positions come from the main Next.js/invest-tracker app
-MOCK_POSITIONS: List[PortfolioPosition] = [
-    PortfolioPosition(
-        asset="BTC/USDT",
-        direction="LONG",
-        entry_price=62000.0,
-        current_price=65000.0,
-        size=0.1,
-        pnl=300.0,
-        pnl_pct=0.0484,
-    ),
-    PortfolioPosition(
-        asset="ETH/USDT",
-        direction="LONG",
-        entry_price=3200.0,
-        current_price=3450.0,
-        size=1.5,
-        pnl=375.0,
-        pnl_pct=0.0781,
-    ),
-]
 
+async def _build_paper_response() -> PortfolioResponse:
+    """Build portfolio response from paper trading state in Redis."""
+    r = aioredis.from_url(settings.redis_url, decode_responses=True)
+    try:
+        positions_raw = await r.get("alpha:paper:positions")
+        stats_raw = await r.get("alpha:paper:stats")
+    finally:
+        await r.aclose()
 
-def _build_mock_response() -> PortfolioResponse:
-    total_pnl = sum(p.pnl for p in MOCK_POSITIONS)
-    invested = sum(p.entry_price * p.size for p in MOCK_POSITIONS)
-    total_value = invested + total_pnl
-    cash = 5000.0
+    positions: List[PortfolioPosition] = []
+    if positions_raw:
+        try:
+            for p in json.loads(positions_raw):
+                entry = p.get("entry_price", 0.0) or 0.0
+                current = p.get("current_price", entry) or entry
+                size = p.get("size", 0.0) or 0.0
+                direction = p.get("direction", "LONG")
+                pnl = (current - entry) * size if direction == "LONG" else (entry - current) * size
+                pnl_pct = (pnl / (entry * size)) if entry * size > 0 else 0.0
+                positions.append(PortfolioPosition(
+                    asset=p.get("asset", ""),
+                    direction=direction,
+                    entry_price=entry,
+                    current_price=current,
+                    size=size,
+                    pnl=round(pnl, 4),
+                    pnl_pct=round(pnl_pct, 6),
+                ))
+        except Exception as exc:
+            logger.warning("Failed to parse paper positions: %s", exc)
+
+    capital = settings.paper_trading_initial_capital
+    total_pnl = 0.0
+    daily_pnl = 0.0
+    if stats_raw:
+        try:
+            stats = json.loads(stats_raw)
+            capital = stats.get("capital", capital)
+            total_pnl = stats.get("total_pnl", 0.0)
+            daily_pnl = stats.get("daily_pnl", 0.0)
+        except Exception:
+            pass
+
+    invested = sum(p.entry_price * p.size for p in positions)
+    total_value = capital + invested
+    daily_pnl_pct = daily_pnl / total_value if total_value > 0 else 0.0
+    total_pnl_pct = total_pnl / settings.paper_trading_initial_capital if settings.paper_trading_initial_capital > 0 else 0.0
 
     return PortfolioResponse(
-        total_value=total_value + cash,
-        cash=cash,
+        total_value=total_value,
+        cash=capital,
         invested=invested,
-        daily_pnl=total_pnl * 0.3,  # mock: 30% of total pnl is "today"
-        daily_pnl_pct=(total_pnl * 0.3) / (total_value + cash),
+        daily_pnl=daily_pnl,
+        daily_pnl_pct=daily_pnl_pct,
         total_pnl=total_pnl,
-        total_pnl_pct=total_pnl / invested if invested > 0 else 0.0,
-        positions=MOCK_POSITIONS,
+        total_pnl_pct=total_pnl_pct,
+        positions=positions,
         timestamp=datetime.now(tz=timezone.utc),
     )
 
@@ -58,8 +80,8 @@ def _build_mock_response() -> PortfolioResponse:
 @router.get("", response_model=PortfolioResponse)
 async def get_portfolio():
     """
-    Portfolio overview. Tries to fetch from the main invest-tracker API if configured,
-    falling back to mock data in standalone mode.
+    Portfolio overview. Returns live paper trading state from Redis.
+    Falls back to invest-tracker API if configured.
     """
     if settings.invest_tracker_url:
         try:
@@ -70,6 +92,6 @@ async def get_portfolio():
                 if data:
                     return PortfolioResponse(**data)
         except Exception as exc:
-            logger.warning("Failed to fetch portfolio from invest-tracker API: %s. Falling back to mock data.", exc)
+            logger.warning("invest-tracker API unavailable: %s — using paper state", exc)
 
-    return _build_mock_response()
+    return await _build_paper_response()

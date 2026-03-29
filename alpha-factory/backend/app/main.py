@@ -244,6 +244,49 @@ async def health():
     except Exception as exc:
         checks["scheduler"] = f"error: {exc}"
 
+    # 5. Paper trading stats (non-critical, best-effort)
+    try:
+        import redis.asyncio as aioredis
+        import json as _json
+        r = aioredis.from_url(settings.redis_url)
+        raw = await r.get("alpha:paper:stats")
+        await r.aclose()
+        if raw:
+            stats = _json.loads(raw)
+            checks["paper_trading"] = {
+                "total_trades": stats.get("total_trades", 0),
+                "win_rate": round(stats.get("win_rate", 0.0), 3),
+                "total_pnl": round(stats.get("total_pnl", 0.0), 4),
+                "max_drawdown": round(stats.get("max_drawdown", 0.0), 4),
+                "instability": stats.get("instability", False),
+            }
+        else:
+            checks["paper_trading"] = "no trades yet"
+    except Exception as exc:
+        checks["paper_trading"] = f"error: {exc}"
+
+    # 6. Drift status per primary asset (non-critical, cached in Redis)
+    try:
+        import redis.asyncio as aioredis
+        import json as _json
+        r = aioredis.from_url(settings.redis_url)
+        drift_status = {}
+        for asset in settings.assets[:2]:
+            for tf in ["1h", "4h"]:
+                key = f"alpha:drift:{asset}:{tf}"
+                raw = await r.get(key)
+                if raw:
+                    d = _json.loads(raw)
+                    if d.get("has_drift") or d.get("regime_unstable"):
+                        drift_status[f"{asset}/{tf}"] = {
+                            "has_drift": d.get("has_drift"),
+                            "regime_unstable": d.get("regime_unstable"),
+                        }
+        await r.aclose()
+        checks["drift"] = drift_status if drift_status else "clean"
+    except Exception as exc:
+        checks["drift"] = f"error: {exc}"
+
     status_code = 200 if overall == "ok" else 503
     return {
         "status": overall,
@@ -275,6 +318,12 @@ async def api_status():
             "rag_context",
             "risk_engine",
             "duplicate_signal_protection",
+            "ws_reconnect_with_backoff",
+            "ws_heartbeat_detection",
+            "feature_drift_monitoring",
+            "paper_trading_loop",
+            "strategy_decay_detection",
+            "portfolio_state_redis",
         ],
         "scheduler_jobs": jobs,
     }
