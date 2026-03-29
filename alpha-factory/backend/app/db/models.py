@@ -105,7 +105,7 @@ class MarketRegime(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     regime: Mapped[RegimeEnum] = mapped_column(Enum(RegimeEnum), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    market_features_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    features_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -219,7 +219,7 @@ class RagDocument(Base):
     asset: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     regime: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    market_features_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    features_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     context_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     trade_outcome: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     risk_reward: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
