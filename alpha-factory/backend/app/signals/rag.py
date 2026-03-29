@@ -211,7 +211,7 @@ class RagStore:
             ]
             return hits
         except Exception as exc:
-            logger.error("RAG retrieve error: %s", exc)
+            logger.debug("RAG retrieve unavailable (Qdrant not running?): %s", exc)
             return []
 
     def build_rag_context(self, similar_states: List[Dict]) -> str:
