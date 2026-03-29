@@ -54,7 +54,7 @@ class RagStore:
 
     def _get_client(self) -> QdrantClient:
         if self._client is None:
-            self._client = QdrantClient(url=settings.qdrant_url)
+            self._client = QdrantClient(url=settings.qdrant_url, check_compatibility=False)
         return self._client
 
     async def ensure_collection(self) -> None:

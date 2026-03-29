@@ -38,6 +38,10 @@ _JOB_TIMEOUTS = {
     "label_job": 180,
     "research_job": 600,
     "signal_job": 120,
+    "drift_job": 120,
+    "paper_ingest_job": 60,
+    "paper_update_job": 60,
+    "paper_decay_job": 60,
 }
 
 
@@ -133,6 +137,49 @@ async def _signal_coro() -> None:
             logger.error("Signal job error %s: %s", tf, exc)
 
 
+async def _drift_coro() -> None:
+    from app.monitor.drift import DriftMonitor
+    monitor = DriftMonitor()
+    for asset in settings.assets:
+        for tf in ["1h", "4h"]:
+            try:
+                result = await monitor.run(asset, tf)
+                if result.has_drift or result.regime_unstable:
+                    logger.warning(
+                        "Drift alert %s/%s: drift=%s regime_unstable=%s",
+                        asset, tf, result.has_drift, result.regime_unstable,
+                    )
+            except Exception as exc:
+                logger.error("Drift monitor error %s/%s: %s", asset, tf, exc)
+
+
+async def _paper_ingest_coro() -> None:
+    from app.execution.paper_trader import PaperTrader
+    trader = PaperTrader()
+    n = await trader.ingest_new_signals()
+    logger.info("Paper trader ingested %d new signals", n)
+
+
+async def _paper_update_coro() -> None:
+    from app.execution.paper_trader import PaperTrader
+    trader = PaperTrader()
+    result = await trader.update_positions()
+    logger.info(
+        "Paper trader update: closed=%s pnl=%.4f instability=%s",
+        result.get("closed", 0),
+        result.get("total_pnl", 0.0),
+        result.get("instability", False),
+    )
+
+
+async def _paper_decay_coro() -> None:
+    from app.execution.paper_trader import PaperTrader
+    trader = PaperTrader()
+    demoted = await trader.check_and_demote_decayed()
+    if demoted:
+        logger.warning("Paper trader demoted %d decayed strategies", demoted)
+
+
 async def _run_ingest_job() -> None:
     await _run_with_instrumentation("ingest_job", _ingest_coro())
 
@@ -155,6 +202,22 @@ async def _run_research_job() -> None:
 
 async def _run_signal_job() -> None:
     await _run_with_instrumentation("signal_job", _signal_coro())
+
+
+async def _run_drift_job() -> None:
+    await _run_with_instrumentation("drift_job", _drift_coro())
+
+
+async def _run_paper_ingest_job() -> None:
+    await _run_with_instrumentation("paper_ingest_job", _paper_ingest_coro())
+
+
+async def _run_paper_update_job() -> None:
+    await _run_with_instrumentation("paper_update_job", _paper_update_coro())
+
+
+async def _run_paper_decay_job() -> None:
+    await _run_with_instrumentation("paper_decay_job", _paper_decay_coro())
 
 
 class AlphaScheduler:
@@ -213,6 +276,42 @@ class AlphaScheduler:
             trigger=IntervalTrigger(minutes=15),
             id="signal_job",
             name="Signal Engine",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        self.scheduler.add_job(
+            _run_drift_job,
+            trigger=IntervalTrigger(hours=2),
+            id="drift_job",
+            name="Drift Monitor",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        self.scheduler.add_job(
+            _run_paper_ingest_job,
+            trigger=IntervalTrigger(minutes=15),
+            id="paper_ingest_job",
+            name="Paper Trader Ingest",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        self.scheduler.add_job(
+            _run_paper_update_job,
+            trigger=IntervalTrigger(minutes=5),
+            id="paper_update_job",
+            name="Paper Trader Update",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        self.scheduler.add_job(
+            _run_paper_decay_job,
+            trigger=IntervalTrigger(hours=2),
+            id="paper_decay_job",
+            name="Paper Trader Decay Check",
             replace_existing=True,
             max_instances=1,
             coalesce=True,

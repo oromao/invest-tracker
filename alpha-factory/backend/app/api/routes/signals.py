@@ -48,7 +48,7 @@ async def list_latest_signals(
     limit: int = Query(50, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    """List the latest signals (one per asset, most recent first). Response is cached in Redis for 30s."""
+    """List the latest signals (one per asset+timeframe, most recent first). Response is cached in Redis for 30s."""
     # Try Redis cache first
     try:
         cached = await redis_client.get(_SIGNALS_CACHE_KEY)
@@ -57,14 +57,17 @@ async def list_latest_signals(
     except Exception as exc:
         logger.warning("Redis GET failed (non-fatal): %s", exc)
 
+    # Latest signal per (asset, timeframe) so 1h and 4h signals coexist
     subq = (
-        select(Signal.asset, func.max(Signal.timestamp).label("max_ts"))
-        .group_by(Signal.asset)
+        select(Signal.asset, Signal.timeframe, func.max(Signal.timestamp).label("max_ts"))
+        .group_by(Signal.asset, Signal.timeframe)
         .subquery()
     )
     stmt = select(Signal).join(
         subq,
-        (Signal.asset == subq.c.asset) & (Signal.timestamp == subq.c.max_ts),
+        (Signal.asset == subq.c.asset)
+        & (Signal.timeframe == subq.c.timeframe)
+        & (Signal.timestamp == subq.c.max_ts),
     ).order_by(desc(Signal.timestamp)).limit(limit)
     result = await db.execute(stmt)
     signals = result.scalars().all()

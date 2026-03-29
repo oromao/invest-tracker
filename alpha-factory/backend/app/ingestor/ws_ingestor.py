@@ -3,34 +3,38 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Optional
 
 import websockets
-from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.data.validator import validate_and_clean_bars
 from app.db.models import OHLCVBar
 from app.db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
 WS_BASE = "wss://stream.binance.com:9443/stream"
-RECONNECT_DELAY = 5  # seconds
+
+# Reconnect: 5s, 10s, 20s, 40s, 60s max
+_BASE_RECONNECT_DELAY = 5
+_MAX_RECONNECT_DELAY = 60
 
 
 def _symbol_to_stream(asset: str) -> str:
-    """Convert 'BTC/USDT' -> 'btcusdt@kline_1m'"""
-    symbol = asset.replace("/", "").lower()
-    return f"{symbol}@kline_1m"
+    return f"{asset.replace('/', '').lower()}@kline_1m"
 
 
 class BinanceWSIngestor:
     def __init__(self) -> None:
         self._running = False
         self._task: Optional[asyncio.Task] = None
+        self._last_msg_time: float = 0.0
+        self._reconnect_count: int = 0
+        self._bars_received: int = 0
 
     def start(self) -> asyncio.Task:
         self._running = True
@@ -43,32 +47,57 @@ class BinanceWSIngestor:
             self._task.cancel()
 
     async def _run_forever(self) -> None:
+        attempt = 0
         while self._running:
             try:
                 await self._connect_and_listen()
+                attempt = 0  # reset on clean exit
             except asyncio.CancelledError:
                 logger.info("WS ingestor cancelled")
                 break
             except Exception as exc:
-                logger.error("WS connection error: %s. Reconnecting in %ds...", exc, RECONNECT_DELAY)
-                await asyncio.sleep(RECONNECT_DELAY)
+                self._reconnect_count += 1
+                delay = min(_BASE_RECONNECT_DELAY * (2 ** attempt), _MAX_RECONNECT_DELAY)
+                logger.error(
+                    "WS error (attempt=%d reconnects=%d): %s — retrying in %ds",
+                    attempt + 1, self._reconnect_count, exc, delay,
+                )
+                attempt += 1
+                await asyncio.sleep(delay)
 
     async def _connect_and_listen(self) -> None:
         streams = [_symbol_to_stream(a) for a in settings.assets]
-        stream_path = "/".join(streams)
-        url = f"{WS_BASE}?streams={stream_path}"
+        url = f"{WS_BASE}?streams={'/'.join(streams)}"
+        heartbeat_timeout = settings.ws_heartbeat_timeout
 
-        logger.info("Connecting to Binance WS: %s", url)
+        logger.info("Connecting Binance WS: %s", url)
         async with websockets.connect(
             url,
             ping_interval=20,
             ping_timeout=10,
             close_timeout=5,
         ) as ws:
-            logger.info("WS connected, listening for klines...")
-            async for raw_msg in ws:
-                if not self._running:
-                    break
+            logger.info("WS connected — listening for klines")
+            self._last_msg_time = time.monotonic()
+
+            while self._running:
+                try:
+                    # Use explicit recv() with timeout to detect silent feeds
+                    raw_msg = await asyncio.wait_for(
+                        ws.recv(), timeout=heartbeat_timeout
+                    )
+                    self._last_msg_time = time.monotonic()
+                except asyncio.TimeoutError:
+                    silent_for = time.monotonic() - self._last_msg_time
+                    logger.warning(
+                        "WS silent for %.0fs (threshold=%ds) — forcing reconnect",
+                        silent_for, heartbeat_timeout,
+                    )
+                    raise ConnectionError("WS heartbeat timeout")
+                except websockets.ConnectionClosed as exc:
+                    logger.warning("WS closed by server: %s", exc)
+                    raise
+
                 try:
                     await self._handle_message(raw_msg)
                 except Exception as exc:
@@ -76,18 +105,16 @@ class BinanceWSIngestor:
 
     async def _handle_message(self, raw_msg: str) -> None:
         data = json.loads(raw_msg)
-        # Combined stream format: {"stream": "btcusdt@kline_1m", "data": {...}}
         payload = data.get("data", data)
+
         if payload.get("e") != "kline":
             return
 
         kline = payload["k"]
-        is_closed = kline.get("x", False)
-        if not is_closed:
+        if not kline.get("x", False):  # only closed candles
             return
 
-        symbol_raw = kline["s"]  # e.g. "BTCUSDT"
-        # Convert back to asset format "BTC/USDT"
+        symbol_raw = kline["s"]
         asset = self._normalize_symbol(symbol_raw)
         if asset is None:
             return
@@ -102,6 +129,24 @@ class BinanceWSIngestor:
             "low": float(kline["l"]),
             "close": float(kline["c"]),
             "volume": float(kline["v"]),
+        }
+
+        # Validate before writing to DB
+        clean, vr = validate_and_clean_bars([bar], "1m", asset)
+        if not clean:
+            logger.warning("WS bar rejected for %s: %s", asset, vr.issues[:2])
+            return
+
+        clean_bar = clean[0]
+        db_row = {
+            "asset": clean_bar["asset"],
+            "timeframe": clean_bar["timeframe"],
+            "timestamp": clean_bar["timestamp"],
+            "open": clean_bar["open"],
+            "high": clean_bar["high"],
+            "low": clean_bar["low"],
+            "close": clean_bar["close"],
+            "volume": clean_bar["volume"],
             "funding_rate": None,
             "open_interest": None,
             "mark_price": None,
@@ -110,7 +155,7 @@ class BinanceWSIngestor:
         async with AsyncSessionLocal() as session:
             stmt = (
                 pg_insert(OHLCVBar)
-                .values([bar])
+                .values([db_row])
                 .on_conflict_do_update(
                     constraint="uq_ohlcv_asset_tf_ts",
                     set_={
@@ -126,17 +171,18 @@ class BinanceWSIngestor:
             await session.commit()
 
             try:
-                await self._aggregate_higher_timeframes(session, asset, bar)
+                await self._aggregate_higher_timeframes(session, asset, db_row)
             except Exception as exc:
-                logger.error("Higher TF aggregation error for %s: %s", asset, exc)
+                logger.error("Higher TF aggregation error %s: %s", asset, exc)
 
-        logger.debug("WS upserted 1m bar for %s at %s", asset, ts)
+        self._bars_received += 1
+        logger.debug("WS bar %s 1m @ %s (total=%d)", asset, ts, self._bars_received)
 
-    async def _aggregate_higher_timeframes(self, db: AsyncSession, asset: str, bar_1m: dict) -> None:
-        """Aggregate 1m bars into higher timeframes (5m, 15m, 1h, 4h, 1d) when a TF boundary is reached."""
+    async def _aggregate_higher_timeframes(self, db, asset: str, bar_1m: dict) -> None:
+        from sqlalchemy import select
+
         ts: datetime = bar_1m["timestamp"]
 
-        # (timeframe_label, num_1m_bars, boundary_check_fn)
         tf_configs = [
             ("5m",  5,    lambda t: t.minute % 5 == 4),
             ("15m", 15,   lambda t: t.minute % 15 == 14),
@@ -149,7 +195,6 @@ class BinanceWSIngestor:
             if not boundary_check(ts):
                 continue
 
-            # Query the last N 1m bars for this asset (ordered ascending)
             stmt = (
                 select(OHLCVBar)
                 .where(OHLCVBar.asset == asset, OHLCVBar.timeframe == "1m")
@@ -160,42 +205,27 @@ class BinanceWSIngestor:
             rows = result.scalars().all()
 
             if len(rows) < n_bars:
-                logger.debug("Not enough 1m bars to aggregate %s for %s (have %d, need %d)", tf_label, asset, len(rows), n_bars)
                 continue
 
-            # Rows are desc; reverse to ascending order
             rows_asc = list(reversed(rows))
-
-            agg_open = rows_asc[0].open
-            agg_high = max(r.high for r in rows_asc)
-            agg_low = min(r.low for r in rows_asc)
-            agg_close = rows_asc[-1].close
-            agg_volume = sum(r.volume for r in rows_asc)
-
             fr_values = [r.funding_rate for r in rows_asc if r.funding_rate is not None]
-            agg_funding_rate = sum(fr_values) / len(fr_values) if fr_values else None
-
             oi_values = [r.open_interest for r in rows_asc if r.open_interest is not None]
-            agg_open_interest = sum(oi_values) / len(oi_values) if oi_values else None
-
-            # Use the timestamp of the first bar in the window as the TF bar timestamp
-            agg_ts = rows_asc[0].timestamp
 
             agg_bar = {
                 "asset": asset,
                 "timeframe": tf_label,
-                "timestamp": agg_ts,
-                "open": agg_open,
-                "high": agg_high,
-                "low": agg_low,
-                "close": agg_close,
-                "volume": agg_volume,
-                "funding_rate": agg_funding_rate,
-                "open_interest": agg_open_interest,
+                "timestamp": rows_asc[0].timestamp,
+                "open": rows_asc[0].open,
+                "high": max(r.high for r in rows_asc),
+                "low": min(r.low for r in rows_asc),
+                "close": rows_asc[-1].close,
+                "volume": sum(r.volume for r in rows_asc),
+                "funding_rate": sum(fr_values) / len(fr_values) if fr_values else None,
+                "open_interest": sum(oi_values) / len(oi_values) if oi_values else None,
                 "mark_price": None,
             }
 
-            upsert_stmt = (
+            upsert = (
                 pg_insert(OHLCVBar)
                 .values([agg_bar])
                 .on_conflict_do_update(
@@ -211,20 +241,16 @@ class BinanceWSIngestor:
                     },
                 )
             )
-            await db.execute(upsert_stmt)
+            await db.execute(upsert)
             await db.commit()
-            logger.debug("Aggregated %s bar for %s at %s", tf_label, asset, agg_ts)
+            logger.debug("Aggregated %s bar for %s at %s", tf_label, asset, agg_bar["timestamp"])
 
     def _normalize_symbol(self, raw: str) -> Optional[str]:
-        """Convert 'BTCUSDT' to 'BTC/USDT' by matching against settings.assets."""
         raw_upper = raw.upper()
         for asset in settings.assets:
-            normalized = asset.replace("/", "").upper()
-            if normalized == raw_upper:
+            if asset.replace("/", "").upper() == raw_upper:
                 return asset
-        # Fallback: try common quote currencies
         for quote in ("USDT", "BUSD", "BTC", "ETH", "BNB"):
             if raw_upper.endswith(quote):
-                base = raw_upper[: -len(quote)]
-                return f"{base}/{quote}"
+                return f"{raw_upper[:-len(quote)]}/{quote}"
         return None

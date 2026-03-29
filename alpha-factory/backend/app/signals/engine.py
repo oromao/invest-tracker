@@ -325,9 +325,16 @@ class SignalEngine:
 
     async def generate_all_signals(self, timeframe: str = "1h") -> List[Signal]:
         from app.config import settings as _settings
+        from app.execution.paper_trader import load_portfolio_state_from_redis
 
         signals = []
-        portfolio_state = PortfolioState()
+        # Load real portfolio state from Redis (paper trader) so risk engine
+        # enforces live exposure limits rather than always-empty state.
+        try:
+            portfolio_state = await load_portfolio_state_from_redis()
+        except Exception as exc:
+            logger.warning("Could not load portfolio state from Redis: %s — using empty", exc)
+            portfolio_state = PortfolioState()
 
         for asset in _settings.assets:
             try:

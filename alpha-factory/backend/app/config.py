@@ -57,6 +57,25 @@ class Settings(BaseSettings):
     # Signal cooldown (seconds) — avoid duplicate signals for same asset
     signal_cooldown_seconds: int = 1800   # 30 minutes
 
+    # Real-time resilience
+    ws_heartbeat_timeout: float = 30.0    # seconds before declaring WS silent/dead
+    signal_staleness_seconds: int = 7200  # signal older than 2h is stale
+
+    # Paper trading engine
+    paper_trading_initial_capital: float = 10000.0
+    paper_trading_tp_pct: float = 0.04    # take-profit target (4%)
+    paper_trading_sl_pct: float = 0.02    # stop-loss target (2%)
+    max_consecutive_losses: int = 5       # instability threshold
+    max_portfolio_drawdown: float = 0.15  # 15% drawdown → halt
+
+    # Strategy decay detection
+    decay_min_trades: int = 20            # min live trades before checking decay
+    decay_win_rate_ratio: float = 0.60    # live WR must be >= 60% of backtest WR
+
+    # Feature drift thresholds
+    drift_sigma_threshold: float = 3.0   # z-score threshold for feature drift
+    max_regime_changes_24h: int = 8       # regime velocity alarm
+
     cors_origins: list[str] = ["*"]
 
     invest_tracker_url: str = ""
