@@ -12,6 +12,7 @@ from app.api.schemas import ResearchCycleRequest, StatusUpdateRequest, StrategyR
 from app.db.models import Strategy, StrategyStatusEnum
 from app.db.session import get_db
 from app.registry.strategies import StrategyRegistry
+from app.shared.time import to_sao_paulo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/research", tags=["research"])
@@ -32,8 +33,8 @@ def _strat_to_response(s: Strategy) -> StrategyResponse:
         name=s.name,
         params=params,
         status=s.status.value if hasattr(s.status, "value") else s.status,
-        created_at=s.created_at,
-        updated_at=s.updated_at,
+        created_at=to_sao_paulo(s.created_at),
+        updated_at=to_sao_paulo(s.updated_at),
     )
 
 

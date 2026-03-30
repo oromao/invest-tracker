@@ -13,6 +13,7 @@ from app.api.schemas import SignalGenerateRequest, SignalResponse
 from app.config import settings
 from app.db.models import Signal
 from app.db.session import get_db
+from app.shared.time import to_sao_paulo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/signals", tags=["signals"])
@@ -28,7 +29,7 @@ def _signal_to_response(s: Signal) -> SignalResponse:
         id=s.id,
         asset=s.asset,
         timeframe=s.timeframe,
-        timestamp=s.timestamp,
+        timestamp=to_sao_paulo(s.timestamp),
         direction=s.direction.value if hasattr(s.direction, "value") else s.direction,
         confidence=s.confidence,
         entry_price=s.entry_price,
@@ -39,7 +40,7 @@ def _signal_to_response(s: Signal) -> SignalResponse:
         rag_context=s.rag_context,
         explanation=s.explanation,
         strategy_id=s.strategy_id,
-        created_at=s.created_at,
+        created_at=to_sao_paulo(s.created_at),
     )
 
 

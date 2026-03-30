@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.schemas import RegimeResponse
 from app.db.models import MarketRegime
 from app.db.session import get_db
+from app.shared.time import to_sao_paulo
 
 router = APIRouter(prefix="/regimes", tags=["regimes"])
 
@@ -25,11 +26,11 @@ def _regime_to_response(r: MarketRegime) -> RegimeResponse:
         id=r.id,
         asset=r.asset,
         timeframe=r.timeframe,
-        timestamp=r.timestamp,
+        timestamp=to_sao_paulo(r.timestamp),
         regime=r.regime.value if hasattr(r.regime, "value") else r.regime,
         confidence=r.confidence,
         features=features,
-        created_at=r.created_at,
+        created_at=to_sao_paulo(r.created_at),
     )
 
 

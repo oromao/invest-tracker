@@ -323,76 +323,79 @@ class ResearchLab:
             logger.warning("Not enough data for research cycle %s/%s", asset, timeframe)
             return {"asset": asset, "timeframe": timeframe, "error": "insufficient data"}
 
-            features_df = await self._load_features_df(session, asset, timeframe)
-            current_regime = await self._get_current_regime(session, asset, timeframe)
+        features_df = await self._load_features_df(session, asset, timeframe)
+        current_regime = await self._get_current_regime(session, asset, timeframe)
 
-            for variant in STRATEGY_VARIANTS:
-                try:
-                    signals = _generate_signals(ohlcv_df, features_df, variant, current_regime)
+        for variant in STRATEGY_VARIANTS:
+            try:
+                signals = _generate_signals(ohlcv_df, features_df, variant, current_regime)
 
-                    if signals.abs().sum() < 5:
-                        logger.debug("Variant %s: too few signals, skipping", variant["name"])
-                        continue
-
-                    # Walk-forward: IS backtest + OOS validation
-                    is_metrics, oos_metrics = backtest_runner.run_walk_forward(
-                        ohlcv_df, signals, variant,
-                        oos_min_sharpe_ratio=oos_min_ratio,
-                    )
-
-                    # Minimum sample size gate
-                    if is_metrics.total_trades < min_trades:
-                        logger.debug(
-                            "Variant %s: only %d IS trades (need %d), skipping",
-                            variant["name"], is_metrics.total_trades, min_trades,
-                        )
-                        continue
-
-                    # Overfitting penalty: halve the composite score
-                    overfit_penalty = 0.5 if is_metrics.is_overfit else 1.0
-
-                    strat = await registry.get_or_create_draft(
-                        session, variant["name"], variant
-                    )
-
-                    await self._store_backtest_run(
-                        session, strat, asset, timeframe, is_metrics, variant, ohlcv_df
-                    )
-
-                    raw_score = is_metrics.sharpe * is_metrics.profit_factor
-                    score = raw_score * overfit_penalty
-
-                    results.append(
-                        {
-                            "name": variant["name"],
-                            "strategy_id": strat.strategy_id,
-                            "sharpe": is_metrics.sharpe,
-                            "profit_factor": is_metrics.profit_factor,
-                            "win_rate": is_metrics.win_rate,
-                            "total_trades": is_metrics.total_trades,
-                            "max_drawdown": is_metrics.max_drawdown,
-                            "oos_sharpe": is_metrics.oos_sharpe,
-                            "oos_profit_factor": is_metrics.oos_profit_factor,
-                            "is_overfit": is_metrics.is_overfit,
-                            "regime_breakdown": is_metrics.regime_breakdown,
-                            "score": score,
-                            "strategy_db_id": strat.id,
-                        }
-                    )
-                    logger.info(
-                        "Variant %s: IS sharpe=%.2f PF=%.2f trades=%d OOS sharpe=%.2f overfit=%s",
-                        variant["name"],
-                        is_metrics.sharpe,
-                        is_metrics.profit_factor,
-                        is_metrics.total_trades,
-                        is_metrics.oos_sharpe or 0.0,
-                        is_metrics.is_overfit,
-                    )
-                except Exception as exc:
-                    logger.error("Error running variant %s: %s", variant["name"], exc)
+                if signals.abs().sum() < 5:
+                    logger.debug("Variant %s: too few signals, skipping", variant["name"])
                     continue
 
-            await session.commit()
+                # Walk-forward: IS backtest + OOS validation
+                is_metrics, oos_metrics = backtest_runner.run_walk_forward(
+                    ohlcv_df, signals, variant,
+                    oos_min_sharpe_ratio=oos_min_ratio,
+                )
+
+                # Overfitting penalty: halve the composite score
+                overfit_penalty = 0.5 if is_metrics.is_overfit else 1.0
+
+                strat = await registry.get_or_create_draft(
+                    session, variant["name"], variant
+                )
+
+                await self._store_backtest_run(
+                    session, strat, asset, timeframe, is_metrics, variant, ohlcv_df
+                )
+
+                raw_score = is_metrics.sharpe * is_metrics.profit_factor
+                score = raw_score * overfit_penalty
+
+                results.append(
+                    {
+                        "name": variant["name"],
+                        "strategy_id": strat.strategy_id,
+                        "sharpe": is_metrics.sharpe,
+                        "profit_factor": is_metrics.profit_factor,
+                        "win_rate": is_metrics.win_rate,
+                        "total_trades": is_metrics.total_trades,
+                        "max_drawdown": is_metrics.max_drawdown,
+                        "oos_sharpe": is_metrics.oos_sharpe,
+                        "oos_profit_factor": is_metrics.oos_profit_factor,
+                        "is_overfit": is_metrics.is_overfit,
+                        "regime_breakdown": is_metrics.regime_breakdown,
+                        "score": score,
+                        "strategy_db_id": strat.id,
+                    }
+                )
+
+                if strat.status == StrategyStatusEnum.draft:
+                    await registry.update_status(session, strat.strategy_id, StrategyStatusEnum.candidate)
+                    logger.info("Strategy %s moved to candidate after valid backtest", strat.strategy_id)
+
+                if is_metrics.total_trades < min_trades:
+                    logger.info(
+                        "Variant %s remains candidate only: %d trades < promotion minimum %d",
+                        variant["name"], is_metrics.total_trades, min_trades,
+                    )
+
+                logger.info(
+                    "Variant %s: IS sharpe=%.2f PF=%.2f trades=%d OOS sharpe=%.2f overfit=%s",
+                    variant["name"],
+                    is_metrics.sharpe,
+                    is_metrics.profit_factor,
+                    is_metrics.total_trades,
+                    is_metrics.oos_sharpe or 0.0,
+                    is_metrics.is_overfit,
+                )
+            except Exception as exc:
+                logger.error("Error running variant %s: %s", variant["name"], exc)
+                continue
+
+        await session.commit()
 
         if not results:
             return {"asset": asset, "timeframe": timeframe, "results": []}

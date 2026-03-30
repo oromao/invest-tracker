@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.schemas import BacktestResponse, BacktestRunRequest
 from app.db.models import BacktestRun, Strategy
 from app.db.session import get_db
+from app.shared.time import to_sao_paulo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/backtests", tags=["backtests"])
@@ -41,11 +42,11 @@ def _run_to_response(run: BacktestRun) -> BacktestResponse:
     return BacktestResponse(
         id=run.id,
         strategy_id=run.strategy_id,
-        run_at=run.run_at,
+        run_at=to_sao_paulo(run.run_at),
         asset=run.asset,
         timeframe=run.timeframe,
-        start_date=run.start_date,
-        end_date=run.end_date,
+        start_date=to_sao_paulo(run.start_date) if run.start_date else None,
+        end_date=to_sao_paulo(run.end_date) if run.end_date else None,
         params=params,
         sharpe=run.sharpe,
         profit_factor=run.profit_factor,
