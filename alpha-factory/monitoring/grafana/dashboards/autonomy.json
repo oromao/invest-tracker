@@ -1,0 +1,117 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Research Cycles / Hour",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum by (asset, timeframe) (increase(alpha_research_cycles_total_v2[1h]))",
+          "legendFormat": "{{asset}} {{timeframe}}",
+          "refId": "A"
+        }
+      ],
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 10 } } }
+    },
+    {
+      "id": 2,
+      "title": "Candidates / Hour",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum by (asset, timeframe) (increase(alpha_research_candidates_total[1h]))",
+          "legendFormat": "{{asset}} {{timeframe}}",
+          "refId": "A"
+        }
+      ],
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 5 } } }
+    },
+    {
+      "id": 3,
+      "title": "Promotion Attempts / Successes",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum by (asset, timeframe) (increase(alpha_promotion_attempts_total[1h]))",
+          "legendFormat": "attempts {{asset}} {{timeframe}}",
+          "refId": "A"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "sum by (asset, timeframe) (increase(alpha_promotion_success_total[1h]))",
+          "legendFormat": "success {{asset}} {{timeframe}}",
+          "refId": "B"
+        }
+      ],
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 5 } } }
+    },
+    {
+      "id": 4,
+      "title": "Leader Changes",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum by (asset, timeframe) (increase(alpha_leader_changes_total[1h]))",
+          "legendFormat": "{{asset}} {{timeframe}}",
+          "refId": "A"
+        }
+      ],
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 5 } } }
+    },
+    {
+      "id": 5,
+      "title": "Promotion Blockers",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum by (blocker) (increase(alpha_promotion_blockers_total[24h]))",
+          "legendFormat": "{{blocker}}",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "options": { "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["alpha-factory", "autonomy", "observability"],
+  "templating": { "list": [] },
+  "timezone": "America/Sao_Paulo",
+  "time": { "from": "now-24h", "to": "now" },
+  "title": "Alpha Factory - Autonomy",
+  "uid": "alpha-autonomy",
+  "version": 1
+}

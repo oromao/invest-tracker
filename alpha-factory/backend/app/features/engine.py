@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Feature, OHLCVBar
 from app.db.session import AsyncSessionLocal
+from app.observability.metrics import record_feature_update
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +218,8 @@ class FeatureEngine:
             count = await self._upsert_features(session, asset, timeframe, feats_df)
             await session.commit()
 
+        if len(feats_df.index) > 0:
+            record_feature_update(asset, timeframe, feats_df.index.max(), count)
         logger.info("Upserted %d feature rows for %s/%s", count, asset, timeframe)
         return count
 

@@ -1,0 +1,147 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Scheduler",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "alpha_readiness_flag{flag=\"scheduler_running\"}",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } } }
+    },
+    {
+      "id": 2,
+      "title": "Signals",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "alpha_readiness_flag{flag=\"signals_fresh\"}",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } } }
+    },
+    {
+      "id": 3,
+      "title": "Market Data",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "alpha_readiness_flag{flag=\"market_fresh\"}",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } } }
+    },
+    {
+      "id": 4,
+      "title": "Research",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "alpha_readiness_flag{flag=\"research_active\"}",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } } }
+    },
+    {
+      "id": 5,
+      "title": "Allocation",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "alpha_readiness_flag{flag=\"allocation_working\"}",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } } }
+    },
+    {
+      "id": 6,
+      "title": "Dry Run Disabled",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "alpha_readiness_flag{flag=\"dry_run_disabled\"}",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } } }
+    },
+    {
+      "id": 7,
+      "title": "Job Staleness",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "alpha_scheduler_job_stale",
+          "legendFormat": "{{job_id}}",
+          "refId": "A"
+        }
+      ],
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 5 } } }
+    },
+    {
+      "id": 8,
+      "title": "Execution Slippage (bps)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "alpha_execution_slippage_bps",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "fieldConfig": { "defaults": { "decimals": 1, "unit": "bps", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 10 }, { "color": "red", "value": 25 }] } } }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["alpha-factory", "readiness", "observability"],
+  "templating": { "list": [] },
+  "timezone": "America/Sao_Paulo",
+  "time": { "from": "now-24h", "to": "now" },
+  "title": "Alpha Factory - Execution Readiness",
+  "uid": "alpha-execution-readiness",
+  "version": 1
+}

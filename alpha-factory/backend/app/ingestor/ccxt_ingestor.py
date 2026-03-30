@@ -14,6 +14,7 @@ from app.config import settings
 from app.data.validator import validate_and_clean_bars
 from app.db.models import OHLCVBar
 from app.db.session import AsyncSessionLocal
+from app.observability.metrics import record_market_update
 from app.shared.time import ensure_timezone
 
 logger = logging.getLogger(__name__)
@@ -208,6 +209,8 @@ class CCXTIngestor:
             count = await self.upsert_bars(session, bars, funding_rate, open_interest, mark_price)
             await session.commit()
 
+        if bars:
+            record_market_update(asset, timeframe, bars[-1]["timestamp"], count)
         logger.info("Ingested %d bars for %s/%s", count, asset, timeframe)
         return count
 

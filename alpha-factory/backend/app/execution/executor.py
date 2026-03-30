@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db.models import DirectionEnum, Position, Signal, Trade
 from app.db.session import async_session_factory
+from app.observability.metrics import EXECUTION_ATTEMPTS, EXECUTION_ERRORS, EXECUTION_SLIPPAGE_BPS
 from app.shared.time import now_sao_paulo
 from app.risk.engine import RiskEngine, SignalInput, PortfolioState
 
@@ -62,6 +63,7 @@ class ExecutionEngine:
     async def run_execution_cycle(self):
         """Check signals and execute trades."""
         logger.info("Starting execution cycle (Dry Run: %s)", settings.dry_run)
+        EXECUTION_SLIPPAGE_BPS.set(float(settings.backtest_slippage_pct * 10000))
         
         async with async_session_factory() as session:
             portfolio = await self._fetch_portfolio_state(session)
@@ -157,6 +159,7 @@ class ExecutionEngine:
                 strategy_id=signal.strategy_id
             )
              session.add(new_pos)
+             EXECUTION_ATTEMPTS.labels(stage="open", result="dry_run").inc()
              logger.info("[DRY RUN] Opened position %s %s | Size: %.4f", side.value, asset, qty)
              return
 
@@ -182,9 +185,11 @@ class ExecutionEngine:
                 exchange_ref=str(order.get("id"))
             )
             session.add(new_pos)
+            EXECUTION_ATTEMPTS.labels(stage="open", result="live").inc()
             logger.info("LIVE Order executed for %s: %s", asset, order.get("id"))
             
         except Exception as e:
+            EXECUTION_ERRORS.labels(stage="open").inc()
             logger.error("Failed to execute live order for %s: %s", asset, e)
 
     async def _close_position(self, session: AsyncSession, pos: Position, reason: str):

@@ -1,0 +1,100 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Leader Score",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "max(alpha_strategy_leader{metric=\"leader_score\"})",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "fieldConfig": { "defaults": { "decimals": 2, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 1 }, { "color": "green", "value": 2 }] } } }
+    },
+    {
+      "id": 2,
+      "title": "Top Candidate Score",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "max(alpha_strategy_leader{metric=\"candidate_score\"})",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "fieldConfig": { "defaults": { "decimals": 2, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 1 }, { "color": "green", "value": 2 }] } } }
+    },
+    {
+      "id": 3,
+      "title": "Candidate Gap",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "max(alpha_strategy_leader{metric=\"candidate_gap\"})",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "fieldConfig": { "defaults": { "decimals": 2, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": -1 }, { "color": "yellow", "value": 0 }, { "color": "red", "value": 0.5 }] } } }
+    },
+    {
+      "id": 4,
+      "title": "Lifecycle Counts",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "alpha_strategy_lifecycle_count",
+          "instant": true,
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "options": { "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 }] } } }
+    },
+    {
+      "id": 5,
+      "title": "Promotion Blockers",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum by (blocker) (increase(alpha_promotion_blockers_total[24h]))",
+          "legendFormat": "{{blocker}}",
+          "refId": "A"
+        }
+      ],
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 10 } } }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["alpha-factory", "governance", "observability"],
+  "templating": { "list": [] },
+  "timezone": "America/Sao_Paulo",
+  "time": { "from": "now-24h", "to": "now" },
+  "title": "Alpha Factory - Strategy Governance",
+  "uid": "alpha-governance",
+  "version": 1
+}

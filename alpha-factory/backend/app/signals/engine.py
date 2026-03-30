@@ -17,6 +17,7 @@ from app.regime.detector import RegimeDetector
 from app.registry.strategies import StrategyRegistry
 from app.risk.engine import PortfolioState, RiskEngine, SignalInput
 from app.signals.rag import RagStore
+from app.observability.metrics import record_signal_cycle, record_signal_generation
 from app.shared.time import now_sao_paulo, ensure_timezone
 
 logger = logging.getLogger(__name__)
@@ -432,6 +433,7 @@ class SignalEngine:
             session.add(signal)
             await session.commit()
             await session.refresh(signal)
+            record_signal_generation(asset, timeframe, direction.value, now)
 
             # 12. Store current state in RAG for future retrieval (best-effort)
             try:
@@ -479,4 +481,5 @@ class SignalEngine:
             except Exception as exc:
                 logger.error("Error generating signal %s/%s: %s", asset, timeframe, exc)
 
+        record_signal_cycle(timeframe, signals)
         return signals

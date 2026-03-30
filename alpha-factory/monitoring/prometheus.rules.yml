@@ -1,0 +1,93 @@
+groups:
+  - name: alpha_factory_readiness
+    interval: 1m
+    rules:
+      - alert: AlphaSchedulerStopped
+        expr: alpha_readiness_flag{flag="scheduler_running"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          team: alpha
+        annotations:
+          summary: "Scheduler stopped"
+          description: "The autonomous scheduler is not reporting as running."
+
+      - alert: AlphaMarketStale
+        expr: alpha_stale_component{component="market"} > 0
+        for: 10m
+        labels:
+          severity: warning
+          team: alpha
+        annotations:
+          summary: "Market data is stale"
+          description: "One or more market feeds have stopped updating."
+
+      - alert: AlphaSignalStale
+        expr: alpha_stale_component{component="signal"} > 0
+        for: 10m
+        labels:
+          severity: warning
+          team: alpha
+        annotations:
+          summary: "Signals are stale"
+          description: "Signal generation has not refreshed in the expected window."
+
+      - alert: AlphaResearchStalled
+        expr: alpha_readiness_flag{flag="research_active"} == 0
+        for: 6h
+        labels:
+          severity: warning
+          team: alpha
+        annotations:
+          summary: "Research loop stalled"
+          description: "The research loop has not produced fresh cycles within the configured window."
+
+      - alert: AlphaNoResearchCycles
+        expr: increase(alpha_research_cycles_total_v2[12h]) == 0
+        for: 30m
+        labels:
+          severity: warning
+          team: alpha
+        annotations:
+          summary: "No research cycles executed"
+          description: "The research subsystem has not run in the last 12 hours."
+
+      - alert: AlphaExcessiveDrawdown
+        expr: alpha_paper_max_drawdown > 0.20
+        for: 5m
+        labels:
+          severity: critical
+          team: alpha
+        annotations:
+          summary: "Paper drawdown exceeds limit"
+          description: "Paper trading drawdown has crossed the safety threshold."
+
+      - alert: AlphaAbnormalPnlDrop
+        expr: delta(alpha_paper_total_pnl[6h]) < -100
+        for: 15m
+        labels:
+          severity: critical
+          team: alpha
+        annotations:
+          summary: "Abnormal paper PnL drop"
+          description: "Total paper PnL dropped sharply over the last 6 hours."
+
+      - alert: AlphaRiskLimitExceeded
+        expr: alpha_risk_total_exposure > 1
+        for: 5m
+        labels:
+          severity: critical
+          team: alpha
+        annotations:
+          summary: "Risk limit exceeded"
+          description: "Paper exposure exceeds available capital."
+
+      - alert: AlphaRepeatedExecutionErrors
+        expr: increase(alpha_execution_errors_total_v2[1h]) > 3
+        for: 15m
+        labels:
+          severity: warning
+          team: alpha
+        annotations:
+          summary: "Repeated execution errors"
+          description: "Execution subsystem has emitted repeated errors in the last hour."

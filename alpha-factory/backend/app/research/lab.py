@@ -13,6 +13,7 @@ from app.backtest.runner import BacktestMetrics, BacktestRunner
 from app.config import settings
 from app.db.models import BacktestRun, OHLCVBar, Strategy, StrategyStatusEnum
 from app.db.session import AsyncSessionLocal
+from app.observability.metrics import BACKTEST_RUNS, record_research_cycle
 from app.shared.time import ensure_timezone, now_sao_paulo
 from app.registry.strategies import StrategyRegistry
 from app.research.memory import StrategyMemoryStore, mutate_variant, score_backtest_metrics, strategy_signature
@@ -387,6 +388,7 @@ class ResearchLab:
         )
         session.add(run)
         await session.flush()
+        BACKTEST_RUNS.labels(asset=asset, timeframe=timeframe).inc()
         return run
 
     async def _load_baseline_score(self, session: AsyncSession, asset: str, timeframe: str) -> float:
@@ -852,7 +854,7 @@ class ResearchLab:
             )
             await session.commit()
 
-            return {
+            result = {
                 "asset": asset,
                 "timeframe": timeframe,
                 "results": results,
@@ -869,3 +871,5 @@ class ResearchLab:
                 "current_active_strategy_id": current_active_strategy_id,
                 "leader_change_reason": leader_change_reason,
             }
+            record_research_cycle(result)
+            return result

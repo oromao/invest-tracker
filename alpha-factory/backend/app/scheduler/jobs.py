@@ -13,6 +13,8 @@ import redis.asyncio as aioredis
 from prometheus_client import Counter, Gauge
 
 from app.config import settings
+from app.db.session import AsyncSessionLocal
+from app.observability.metrics import record_job_failure, record_job_run, sync_snapshot
 from app.shared.time import now_sao_paulo
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,7 @@ _JOB_TIMEOUTS = {
     "paper_allocation_job": 120,
     "paper_update_job": 60,
     "paper_decay_job": 60,
+    "observability_job": 120,
 }
 
 JOB_INTERVAL_MINUTES = {
@@ -68,6 +71,7 @@ JOB_INTERVAL_MINUTES = {
     "paper_update_job": 5,
     "paper_decay_job": 120,
     "watchdog_job": 10,
+    "observability_job": 5,
 }
 
 
@@ -102,14 +106,17 @@ async def _run_with_instrumentation(job_id: str, coro) -> None:
         _JOB_DURATION.labels(job_id=job_id).set(duration)
         logger.info("Job %s completed in %.1fs", job_id, duration)
         await _record_heartbeat(job_id, "ok", duration=duration)
+        record_job_run(job_id, duration, True)
     except asyncio.TimeoutError:
         _JOB_FAILURES.labels(job_id=job_id).inc()
         logger.error("Job %s TIMED OUT after %ds", job_id, timeout)
         await _record_heartbeat(job_id, "timeout", duration=timeout, error="timeout")
+        record_job_failure(job_id)
     except Exception as exc:
         _JOB_FAILURES.labels(job_id=job_id).inc()
         logger.error("Job %s FAILED: %s", job_id, exc, exc_info=True)
         await _record_heartbeat(job_id, "error", duration=time.monotonic() - start, error=str(exc))
+        record_job_failure(job_id)
 
 
 async def _ingest_coro() -> None:
@@ -260,6 +267,15 @@ async def _paper_decay_coro() -> None:
         logger.warning("Paper trader demoted %d decayed strategies", demoted)
 
 
+async def _observability_coro() -> None:
+    async with AsyncSessionLocal() as session:
+        await sync_snapshot(
+            session,
+            redis_url=settings.redis_url,
+            scheduler_running=True,
+        )
+
+
 async def _watchdog_coro() -> None:
     r = None
     try:
@@ -339,6 +355,8 @@ async def _watchdog_coro() -> None:
         await _run_paper_update_job()
     if "paper_decay_job" in stale:
         await _run_paper_decay_job()
+    if "observability_job" in stale:
+        await _run_observability_job()
 
 
 async def _run_ingest_job() -> None:
@@ -395,6 +413,10 @@ async def _run_paper_update_job() -> None:
 
 async def _run_paper_decay_job() -> None:
     await _run_with_instrumentation("paper_decay_job", _paper_decay_coro())
+
+
+async def _run_observability_job() -> None:
+    await _run_with_instrumentation("observability_job", _observability_coro())
 
 
 async def _run_watchdog_job() -> None:
@@ -534,6 +556,15 @@ class AlphaScheduler:
             coalesce=True,
         )
         self.scheduler.add_job(
+            _run_observability_job,
+            trigger=IntervalTrigger(minutes=5),
+            id="observability_job",
+            name="Observability Snapshot",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        self.scheduler.add_job(
             _run_watchdog_job,
             trigger=IntervalTrigger(minutes=10),
             id="watchdog_job",
@@ -584,5 +615,6 @@ class AlphaScheduler:
         await _run_paper_allocation_job()
         await _run_audit_job()
         await _run_drift_job()
+        await _run_observability_job()
         await _run_watchdog_job()
         logger.info("Initial pipeline jobs complete")
