@@ -15,10 +15,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="pt-BR">
-      <body className="overflow-x-hidden">
+      <body className="overflow-x-hidden antialiased">
         <Providers>
           <Sidebar />
-          <main className="md:ml-56 min-h-screen p-4 md:p-6 pt-16 md:pt-6 min-w-0">
+          <main className="min-h-screen min-w-0 p-4 pt-16 md:ml-[18rem] md:p-8 md:pt-8">
             {children}
           </main>
         </Providers>

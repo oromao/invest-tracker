@@ -20,7 +20,7 @@ export function StatusPill({
     <Badge
       variant={tone as any}
       className={cn(
-        'rounded-full px-2.5 py-1 text-[10px] uppercase tracking-[0.18em]',
+        'whitespace-nowrap rounded-full px-2.5 py-1 text-[10px] uppercase tracking-[0.18em]',
         className
       )}
     >
@@ -89,11 +89,11 @@ export function MetricCard({
   }
 
   return (
-    <Card className="relative overflow-hidden">
+    <Card className="relative h-full overflow-hidden">
       <div className="absolute inset-x-0 top-0 h-px bg-white/10" />
       <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/38">{label}</div>
-      <div className={cn('mt-2 text-2xl font-semibold tabular-nums', toneClasses[tone])}>{value}</div>
-      {note && <div className="mt-2 text-xs leading-5 text-white/45">{note}</div>}
+      <div className={cn('mt-2 break-words text-2xl font-semibold tabular-nums leading-tight', toneClasses[tone])}>{value}</div>
+      {note && <div className="mt-2 break-words text-xs leading-5 text-white/45">{note}</div>}
     </Card>
   )
 }
@@ -112,7 +112,7 @@ export function Surface({
   className?: string
 }) {
   return (
-    <section className={cn('rounded-[1.35rem] border border-white/10 bg-[#101010] shadow-[0_1px_0_rgba(255,255,255,0.04)]', className)}>
+    <section className={cn('overflow-hidden rounded-[1.35rem] border border-white/10 bg-[#101010] shadow-[0_1px_0_rgba(255,255,255,0.04)]', className)}>
       <div className="flex flex-col gap-3 border-b border-white/8 px-4 py-4 md:px-5 md:py-5 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{title}</h2>
@@ -163,10 +163,9 @@ export function InlineStat({
   }
 
   return (
-    <div className="rounded-xl border border-white/8 bg-white/[0.02] px-3 py-3">
+    <div className="min-w-0 rounded-xl border border-white/8 bg-white/[0.02] px-3 py-3">
       <div className="text-[11px] uppercase tracking-[0.18em] text-white/35">{label}</div>
-      <div className={cn('mt-1 text-base font-semibold tabular-nums', toneClasses[tone])}>{value}</div>
+      <div className={cn('mt-1 break-words text-base font-semibold tabular-nums leading-5', toneClasses[tone])}>{value}</div>
     </div>
   )
 }
-

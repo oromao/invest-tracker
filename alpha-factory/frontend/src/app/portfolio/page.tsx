@@ -115,6 +115,12 @@ export default function PortfolioPage() {
       }
     })
   }, [display.positions, search, sideFilter, sortKey, sortDir])
+  const longCount = positions.filter((position) => position.side === 'LONG').length
+  const shortCount = positions.filter((position) => position.side === 'SHORT').length
+  const largestPosition = positions.reduce<ReturnType<typeof normalizePosition> | null>((acc, position) => {
+    if (!acc) return position
+    return position.entry_price * position.size > acc.entry_price * acc.size ? position : acc
+  }, null)
   const sortOptions = [
     ['asset', 'Asset'],
     ['side', 'Side'],
@@ -157,6 +163,15 @@ export default function PortfolioPage() {
         <MetricCard label="Daily PnL" value={`${display.daily_pnl >= 0 ? '+' : ''}${formatBRL(display.daily_pnl)}`} tone={display.daily_pnl >= 0 ? 'success' : 'danger'} />
         <MetricCard label="Active Positions" value={display.active_positions} tone="info" />
       </div>
+
+      <Surface title="Exposure summary" description="Allocation by strategy is not stored here, so the dashboard uses open notional as the real proxy.">
+        <div className="grid gap-3 md:grid-cols-4">
+          <InlineStat label="Long / Short" value={`${longCount}/${shortCount}`} tone="info" />
+          <InlineStat label="Invested" value={formatBRL(display.invested ?? 0)} />
+          <InlineStat label="Open Notional" value={formatBRL(positions.reduce((sum, position) => sum + position.entry_price * position.size, 0))} />
+          <InlineStat label="Largest Asset" value={largestPosition?.asset ?? 'n/a'} tone={largestPosition ? 'warning' : 'default'} />
+        </div>
+      </Surface>
 
       <Surface title="Filters" description="Search by asset or linked signal.">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -221,8 +236,9 @@ export default function PortfolioPage() {
                 <div className="mt-4 rounded-xl border border-white/8 bg-white/[0.02] p-3 text-sm text-white/55">
                   PnL: {pos.pnl_usd >= 0 ? '+' : ''}{formatBRL(pos.pnl_usd)}
                 </div>
-                <div className="mt-4 text-xs text-white/40">
-                  Last signal: {pos.last_signal_id ?? 'n/a'}
+                <div className="mt-4 grid gap-2 text-xs text-white/40 sm:grid-cols-2">
+                  <div>Last signal: {pos.last_signal_id ?? 'n/a'}</div>
+                  <div>Notional: {formatBRL(pos.entry_price * pos.size)}</div>
                 </div>
               </Card>
             ))}

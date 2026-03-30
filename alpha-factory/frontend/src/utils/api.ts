@@ -83,3 +83,8 @@ export const fetchPortfolio = async () => {
   const { data } = await api.get("/api/portfolio");
   return data;
 };
+
+export const fetchHealth = async () => {
+  const { data } = await api.get("/health");
+  return data;
+};
