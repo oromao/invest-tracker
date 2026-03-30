@@ -97,6 +97,67 @@ class StrategyMemoryStore:
         value = result.scalar_one_or_none()
         return float(value or 0.0)
 
+    async def best_active_score(
+        self,
+        session: AsyncSession,
+        *,
+        asset: Optional[str] = None,
+        timeframe: Optional[str] = None,
+    ) -> float:
+        stmt = (
+            select(func.max(StrategyMemory.score))
+            .join(Strategy, Strategy.strategy_id == StrategyMemory.strategy_id)
+            .where(
+                Strategy.status == StrategyStatusEnum.active,
+                StrategyMemory.event_type == "backtest_completed",
+            )
+        )
+        if asset:
+            stmt = stmt.where(StrategyMemory.asset == asset)
+        if timeframe:
+            stmt = stmt.where(StrategyMemory.timeframe == timeframe)
+        result = await session.execute(stmt)
+        value = result.scalar_one_or_none()
+        return float(value or 0.0)
+
+    async def latest_event(
+        self,
+        session: AsyncSession,
+        strategy_id: str,
+        *,
+        event_types: Optional[list[str]] = None,
+    ) -> Optional[StrategyMemory]:
+        stmt = (
+            select(StrategyMemory)
+            .where(StrategyMemory.strategy_id == strategy_id)
+            .order_by(desc(StrategyMemory.created_at), desc(StrategyMemory.id))
+        )
+        if event_types:
+            stmt = stmt.where(StrategyMemory.event_type.in_(event_types))
+        stmt = stmt.limit(1)
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def recent_backtest_scores(
+        self,
+        session: AsyncSession,
+        strategy_id: str,
+        *,
+        limit: int = 3,
+    ) -> list[float]:
+        stmt = (
+            select(StrategyMemory.score)
+            .where(
+                StrategyMemory.strategy_id == strategy_id,
+                StrategyMemory.event_type == "backtest_completed",
+                StrategyMemory.score.is_not(None),
+            )
+            .order_by(desc(StrategyMemory.created_at), desc(StrategyMemory.id))
+            .limit(limit)
+        )
+        result = await session.execute(stmt)
+        return [float(v or 0.0) for v in result.scalars().all()]
+
     async def record_event(
         self,
         session: AsyncSession,
@@ -259,6 +320,7 @@ class StrategyMemoryStore:
         strategy_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         leaderboard = await self.leaderboard(session, asset=asset, timeframe=timeframe, limit=5)
+        best_active_score = await self.best_active_score(session, asset=asset, timeframe=timeframe)
         best_proven_score = await self.best_proven_score(session, asset=asset, timeframe=timeframe)
         target = None
         if strategy_id:
@@ -271,6 +333,7 @@ class StrategyMemoryStore:
 
         if target is None:
             return {
+                "baseline_current_active_score": best_active_score,
                 "baseline_proven_score": best_proven_score,
                 "target": None,
                 "gates": [],
@@ -294,8 +357,8 @@ class StrategyMemoryStore:
         )
         trade_floor = max(1, settings.min_trades_for_promotion - max(0, int(settings.promotion_min_trade_margin)))
         score = float(target.score or 0.0)
-        baseline = best_proven_score
-        score_floor = max(settings.promotion_min_sharpe, baseline * 1.15 if baseline > 0 else settings.promotion_min_sharpe)
+        baseline = best_active_score or best_proven_score
+        score_floor = max(settings.promotion_min_sharpe, baseline * 1.01 if baseline > 0 else settings.promotion_min_sharpe)
         gates = {
             "score": score >= score_floor,
             "trades": metrics.total_trades >= trade_floor,
@@ -319,6 +382,7 @@ class StrategyMemoryStore:
             blockers.append("candidate marked overfit")
 
         return {
+            "baseline_current_active_score": best_active_score,
             "baseline_proven_score": baseline,
             "target": {
                 "strategy_id": target.strategy_id,
@@ -339,6 +403,7 @@ class StrategyMemoryStore:
             "blockers": blockers,
             "closest_to_promotion": not blockers,
             "weak_to_deprecate": _is_weak_enough_to_deprecate(metrics, score, baseline),
+            "current_active_score": best_active_score,
         }
 
 

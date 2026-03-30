@@ -30,7 +30,10 @@ interface Strategy {
   latest_reason?: string | null
   latest_metrics?: Record<string, number | string | null> | null
   promotion_diagnostics?: {
+    baseline_current_active_score?: number
     baseline_proven_score?: number
+    current_active_score?: number
+    competition_mode?: string
     blockers?: string[]
     closest_to_promotion?: boolean
     weak_to_deprecate?: boolean
@@ -248,9 +251,9 @@ export default function ResearchPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
             <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-              <div className="text-white/35 text-xs uppercase">Baseline</div>
-              <div className="text-white font-semibold">{Number(promotionStatus.baseline_proven_score ?? 0).toFixed(3)}</div>
-              <div className="text-white/35 text-xs mt-1">Proven active baseline</div>
+              <div className="text-white/35 text-xs uppercase">Active Baseline</div>
+              <div className="text-white font-semibold">{Number(promotionStatus.baseline_current_active_score ?? promotionStatus.baseline_proven_score ?? 0).toFixed(3)}</div>
+              <div className="text-white/35 text-xs mt-1">{promotionStatus.competition_mode || 'current_active_baseline'}</div>
             </div>
             <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
               <div className="text-white/35 text-xs uppercase">Top Candidate</div>

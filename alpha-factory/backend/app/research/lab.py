@@ -390,6 +390,9 @@ class ResearchLab:
         return run
 
     async def _load_baseline_score(self, session: AsyncSession, asset: str, timeframe: str) -> float:
+        active_score = await memory_store.best_active_score(session, asset=asset, timeframe=timeframe)
+        if active_score > 0:
+            return active_score
         return await memory_store.best_proven_score(session, asset=asset, timeframe=timeframe)
 
     async def _build_candidate_pool(
@@ -400,6 +403,7 @@ class ResearchLab:
     ) -> List[Dict]:
         pool: List[Dict] = [dict(v) for v in STRATEGY_VARIANTS]
         winners = await memory_store.load_winners(session, asset=asset, timeframe=timeframe, limit=5)
+        current_active = await registry.get_active_strategies(session)
         seen_signatures = {strategy_signature(v) for v in pool}
         failed = await memory_store.recent_failed_signatures(session, asset=asset, timeframe=timeframe, limit=40)
 
@@ -409,6 +413,20 @@ class ResearchLab:
                 continue
             mutated = mutate_variant(base, seed_score=float(winner.get("score", 0.0) or 0.0))
             mutated.setdefault("regime", base.get("regime", []))
+            sig = strategy_signature(mutated)
+            if sig in seen_signatures or sig in failed:
+                continue
+            seen_signatures.add(sig)
+            pool.append(mutated)
+
+        for strat in current_active[:3]:
+            if not strat.params_json:
+                continue
+            try:
+                params = json.loads(strat.params_json)
+            except Exception:
+                continue
+            mutated = mutate_variant(params, seed_score=0.0)
             sig = strategy_signature(mutated)
             if sig in seen_signatures or sig in failed:
                 continue
@@ -467,7 +485,7 @@ class ResearchLab:
         active_strategies = await registry.get_active_strategies(session)
         threshold = max(baseline_score, top_score) * 0.75
         for active in active_strategies:
-            latest = await memory_store.latest_state(session, active.strategy_id)
+            latest = await memory_store.latest_event(session, active.strategy_id, event_types=["backtest_completed", "promoted"])
             if latest is None or latest.asset != asset or latest.timeframe != timeframe:
                 continue
             active_metrics = None
@@ -490,6 +508,15 @@ class ResearchLab:
 
             score = latest.score or 0.0
             should_deprecate = _is_weak_enough_to_deprecate(active_metrics, score, threshold)
+            recent_scores = await memory_store.recent_backtest_scores(session, active.strategy_id, limit=3)
+            if len(recent_scores) >= 2:
+                recent_avg = sum(recent_scores) / len(recent_scores)
+                if score < recent_avg * 0.92:
+                    should_deprecate = True
+            if active_metrics is not None and active_metrics.max_drawdown >= 0.20 and active_metrics.profit_factor < 1.05:
+                should_deprecate = True
+            if active_metrics is not None and active_metrics.total_trades < max(10, settings.min_trades_for_promotion // 2):
+                should_deprecate = True
             if should_deprecate:
                 await registry.update_status(session, active.strategy_id, StrategyStatusEnum.deprecated)
                 await self._record_memory(
@@ -501,7 +528,7 @@ class ResearchLab:
                     lifecycle_state="degraded",
                     metrics=active_metrics or BacktestMetrics(),
                     params=json.loads(active.params_json) if active.params_json else {},
-                    reason="auto-deprecated after underperforming the current research frontier",
+                    reason="auto-deprecated after underperforming current baseline or recent performance",
                     score=score,
                 )
                 deprecated.append(active.strategy_id)
@@ -757,6 +784,7 @@ class ResearchLab:
                 timeframe=timeframe,
                 strategy_id=promotion_candidate["strategy_id"] if promotion_candidate else top["strategy_id"],
             )
+            promotion_diagnostics["competition_mode"] = "current_active_baseline"
 
             auto_promoted_strategy_id = None
             if promotion_candidate is not None:
