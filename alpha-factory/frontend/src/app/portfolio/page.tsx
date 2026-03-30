@@ -87,7 +87,7 @@ export default function PortfolioPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
+      <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-bold text-white">Portfolio</h1>
         <p className="text-sm text-white/50 mt-0.5">Live position monitor</p>
       </div>
@@ -99,7 +99,7 @@ export default function PortfolioPage() {
       )}
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
         {isLoading ? (
           Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
         ) : (

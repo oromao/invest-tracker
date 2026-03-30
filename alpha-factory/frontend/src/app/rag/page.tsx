@@ -14,15 +14,11 @@ import {
   Box,
   ChevronRight,
 } from "lucide-react";
+import { formatSaoPauloDateTime } from "@/lib/time";
 import { fetchSignals } from "@/utils/api";
 
 function normalizeConfidence(value: number): number {
   return Math.abs(value) <= 1 ? value * 100 : value;
-}
-
-function formatUtcDateTime(timestamp: string): string {
-  const iso = new Date(timestamp).toISOString()
-  return `${iso.slice(8, 10)}/${iso.slice(5, 7)} ${iso.slice(11, 16)}`
 }
 
 export default function RAGPage() {
@@ -85,15 +81,15 @@ export default function RAGPage() {
             Histórico real das últimas leituras de sinal e contexto recuperado pelo backend.
           </p>
         </div>
-        <div className="flex gap-4 flex-wrap">
-          <div className="p-3 bg-white/5 border border-white/5 rounded-2xl flex items-center gap-3">
+        <div className="flex gap-4 flex-wrap w-full md:w-auto">
+          <div className="p-3 bg-white/5 border border-white/5 rounded-2xl flex items-center gap-3 w-full md:w-auto">
             <Search className="w-4 h-4 text-white/30" />
             <input
               type="text"
               placeholder="Find similar market states..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className="bg-transparent text-sm text-white focus:outline-none w-64 font-mono placeholder:text-white/20"
+              className="bg-transparent text-sm text-white focus:outline-none w-full md:w-64 font-mono placeholder:text-white/20"
             />
           </div>
           <button
@@ -165,7 +161,7 @@ export default function RAGPage() {
                   </div>
                   <div className="flex items-center gap-2 text-[10px] text-white/30 font-mono">
                     <Clock className="w-3 h-3" />
-                    {formatUtcDateTime(signal.timestamp)}
+                    {formatSaoPauloDateTime(signal.timestamp)}
                   </div>
                 </div>
                 <p className="text-sm text-white/60 leading-relaxed mb-4 font-sans italic">

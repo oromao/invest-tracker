@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -15,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import MarketRegime, RegimeEnum
 from app.db.session import AsyncSessionLocal
+from app.shared.time import ensure_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -174,8 +174,7 @@ class RegimeDetector:
             current_ts = pivot.index[-1]
             if hasattr(current_ts, "to_pydatetime"):
                 current_ts = current_ts.to_pydatetime()
-            if current_ts.tzinfo is None:
-                current_ts = current_ts.replace(tzinfo=timezone.utc)
+            current_ts = ensure_timezone(current_ts)
 
             features_snapshot = {
                 col: float(pivot.iloc[-1][col]) for col in pivot.columns

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -22,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db.models import DirectionEnum, OHLCVBar, StrategyStatusEnum
 from app.db.session import AsyncSessionLocal
+from app.shared.time import now_sao_paulo
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ class PaperTrader:
                 }
                 for p in open_pos
             ],
-            "last_updated": datetime.now(tz=timezone.utc).isoformat(),
+            "last_updated": now_sao_paulo().isoformat(),
         }
         await r.set(_KEY_PORTFOLIO, json.dumps(state), ex=3600)
 
@@ -236,7 +236,7 @@ class PaperTrader:
                     pnl=round(pnl, 4),
                     outcome=outcome,
                     exit_price=actual_exit,
-                    close_ts=datetime.now(tz=timezone.utc).isoformat(),
+                    close_ts=now_sao_paulo().isoformat(),
                 )
 
                 # Update statistics

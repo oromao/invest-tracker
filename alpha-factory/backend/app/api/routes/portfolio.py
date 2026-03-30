@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from typing import List
 
 import httpx
@@ -15,6 +14,7 @@ from app.api.schemas import PortfolioPosition, PortfolioResponse
 from app.config import settings
 from app.db.models import OHLCVBar, Position, Signal, Trade
 from app.db.session import get_db
+from app.shared.time import now_sao_paulo, to_sao_paulo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
@@ -98,7 +98,7 @@ async def _build_paper_response() -> PortfolioResponse:
         total_pnl_pct=total_pnl_pct,
         active_positions=len(positions),
         positions=positions,
-        timestamp=datetime.now(tz=timezone.utc),
+        timestamp=now_sao_paulo(),
     )
 
 
@@ -108,7 +108,7 @@ async def _build_db_response(db: AsyncSession) -> PortfolioResponse:
     positions = result.scalars().all()
 
     if not positions:
-        now = datetime.now(tz=timezone.utc)
+        now = now_sao_paulo()
         return PortfolioResponse(
             total_value=0.0,
             cash=0.0,
@@ -166,7 +166,7 @@ async def _build_db_response(db: AsyncSession) -> PortfolioResponse:
             )
         )
 
-    now = datetime.now(tz=timezone.utc)
+    now = now_sao_paulo()
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     trades_stmt = select(Trade.pnl).where(Trade.exit_time >= midnight)
     trades_result = await db.execute(trades_stmt)

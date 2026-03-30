@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import timezone
 from typing import List, Optional
 
 import numpy as np
@@ -13,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db.models import BarrierEnum, Label, OHLCVBar
 from app.db.session import AsyncSessionLocal
+from app.shared.time import ensure_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -119,8 +119,7 @@ class TripleBarrierLabeler:
             for ts, row in labeled.iterrows():
                 if hasattr(ts, "to_pydatetime"):
                     ts = ts.to_pydatetime()
-                if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
+                ts = ensure_timezone(ts)
 
                 barrier_enum = BarrierEnum(row["barrier_hit"])
                 db_rows.append(

@@ -14,6 +14,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { SkeletonRow } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
+import { formatSaoPauloDateTime } from '@/lib/time'
 import { fetchBacktests, runBacktest } from '@/utils/api'
 
 interface BacktestRun {
@@ -30,16 +31,6 @@ interface BacktestRun {
   total_trades: number
   equity_curve?: { date: string; equity: number }[]
   equity_curve_json: { date: string; equity: number }[]
-}
-
-function formatUtcDate(timestamp: string): string {
-  const iso = new Date(timestamp).toISOString()
-  return `${iso.slice(5, 7)}/${iso.slice(8, 10)}`
-}
-
-function formatUtcDateTime(timestamp: string): string {
-  const iso = new Date(timestamp).toISOString()
-  return `${iso.slice(8, 10)}/${iso.slice(5, 7)} ${iso.slice(11, 16)}`
 }
 
 function sharpeBadge(sharpe: number) {
@@ -86,7 +77,7 @@ export default function BacktestsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Backtest Results</h1>
           <p className="text-sm text-white/50 mt-0.5">Strategy performance analysis</p>
@@ -106,7 +97,7 @@ export default function BacktestsPage() {
       )}
 
       {/* Filter */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
         <label className="text-sm text-white/50">Strategy:</label>
         <select
           value={filterStrategy}
@@ -171,7 +162,7 @@ export default function BacktestsPage() {
                     <td className="px-4 py-3 text-right text-white/70 tabular-nums">{(bt.win_rate * 100).toFixed(1)}%</td>
                     <td className="px-4 py-3 text-right text-white/70 tabular-nums">{bt.expectancy.toFixed(1)}</td>
                     <td className="px-4 py-3 text-right text-white/70 tabular-nums">{bt.total_trades}</td>
-                    <td className="px-4 py-3 text-white/40 text-xs">{formatUtcDateTime(bt.run_at)}</td>
+                    <td className="px-4 py-3 text-white/40 text-xs">{formatSaoPauloDateTime(bt.run_at)}</td>
                   </tr>
                 ))
               )}

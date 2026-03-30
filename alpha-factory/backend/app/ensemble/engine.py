@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import select, desc
@@ -23,6 +22,7 @@ from app.registry.strategies import StrategyVersionRegistry
 from app.risk.engine import RiskEngine, SignalInput, PortfolioState
 from app.signals.rag import RagStore
 from app.signals.engine import _apply_strategy_logic
+from app.shared.time import now_sao_paulo
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +190,7 @@ class MetaStrategyEnsemble:
             signal = Signal(
                 asset=asset,
                 timeframe=timeframe,
-                timestamp=datetime.now(tz=timezone.utc),
+                timestamp=now_sao_paulo(),
                 direction=final_direction,
                 confidence=final_confidence,
                 entry_price=entry_price if entry_price > 0 else None,

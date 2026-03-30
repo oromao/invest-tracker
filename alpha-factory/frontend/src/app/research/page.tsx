@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardTitle, CardValue } from '@/components/ui/card'
 import { SkeletonCard, SkeletonRow } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
+import { formatSaoPauloDateTime } from '@/lib/time'
 import {
   deprecateStrategy,
   fetchStrategies,
@@ -30,11 +31,6 @@ const STATUS_META: Record<Strategy['status'], { variant: StatusVariant; label: s
   candidate: { variant: 'warning', label: 'Candidate' },
   active: { variant: 'success', label: 'Active' },
   deprecated: { variant: 'danger', label: 'Deprecated' },
-}
-
-function formatUtcDateTime(timestamp: string): string {
-  const iso = new Date(timestamp).toISOString()
-  return `${iso.slice(8, 10)}/${iso.slice(5, 7)} ${iso.slice(11, 16)}`
 }
 
 export default function ResearchPage() {
@@ -74,7 +70,7 @@ export default function ResearchPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Research Lab</h1>
           <p className="text-sm text-white/50 mt-0.5">Autonomous Strategy Discovery</p>
@@ -110,7 +106,7 @@ export default function ResearchPage() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
         {isLoading ? (
           Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
         ) : (
@@ -138,20 +134,20 @@ export default function ResearchPage() {
       {/* Pipeline Flow */}
       <div className="bg-[#111111] border border-white/10 rounded-xl p-4">
         <h2 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-4">Strategy Pipeline</h2>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-2">
           {[
             { label: 'Draft', count: drafts, color: 'bg-white/10 text-white/50 border-white/10' },
             { label: 'Candidate', count: candidates, color: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20' },
             { label: 'Active', count: active, color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' },
             { label: 'Deprecated', count: deprecated, color: 'bg-red-500/15 text-red-400 border-red-500/20' },
           ].map((stage, i) => (
-            <div key={stage.label} className="flex items-center gap-2 flex-1">
+            <div key={stage.label} className="flex flex-col md:flex-row items-stretch md:items-center gap-2 flex-1">
               <div className={cn('flex-1 rounded-lg border px-3 py-2.5 text-center', stage.color)}>
                 <div className="text-lg font-bold">{stage.count}</div>
                 <div className="text-xs opacity-80">{stage.label}</div>
               </div>
               {i < 3 && (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4 text-white/20 flex-shrink-0">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4 text-white/20 flex-shrink-0 self-center rotate-90 md:rotate-0">
                   <path strokeLinecap="round" d="M9 18l6-6-6-6" />
                 </svg>
               )}
@@ -207,7 +203,7 @@ export default function ResearchPage() {
                       <td className="px-4 py-3"><Badge variant={meta.variant}>{meta.label}</Badge></td>
                       <td className="px-4 py-3 font-mono text-xs text-white/40 max-w-[180px] truncate">{paramsPreview}</td>
                       <td className="px-4 py-3 text-white/40 text-xs">
-                        {formatUtcDateTime(strategy.updated_at)}
+                        {formatSaoPauloDateTime(strategy.updated_at)}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">

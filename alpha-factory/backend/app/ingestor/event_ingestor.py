@@ -1,12 +1,12 @@
 import logging
 import uuid
-from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
 from app.db.models import EventSummary, RagDocument
 from app.db.session import async_session_factory
 from app.signals.rag import RagStore
+from app.shared.time import now_sao_paulo
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class EventIngestor:
         """Add a manual or automated market event."""
         async with async_session_factory() as session:
             event = EventSummary(
-                timestamp=datetime.now(tz=timezone.utc),
+                timestamp=now_sao_paulo(),
                 event_type=event_type,
                 source=source,
                 summary=summary,

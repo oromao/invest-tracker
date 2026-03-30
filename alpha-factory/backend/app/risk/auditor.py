@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy import select, update, func
@@ -9,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Strategy, Trade, StrategyStatusEnum
 from app.db.session import AsyncSessionLocal
+from app.shared.time import now_sao_paulo
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class StrategyAuditor:
                         "Strategy %s decayed! Deprecating...", strategy.strategy_id
                     )
                     strategy.status = StrategyStatusEnum.deprecated
-                    strategy.updated_at = datetime.now(timezone.utc)
+                    strategy.updated_at = now_sao_paulo()
                     deprecated_count += 1
             
             await session.commit()

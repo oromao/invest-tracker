@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardTitle } from '@/components/ui/card'
 import { SkeletonCard, SkeletonRow } from '@/components/ui/skeleton'
+import { formatSaoPauloDateTime, formatSaoPauloTime } from '@/lib/time'
 import { fetchRegimes } from '@/utils/api'
 
 interface Regime {
@@ -29,15 +30,6 @@ function normalizeConfidence(value: number): number {
   return Math.abs(value) <= 1 ? value * 100 : value
 }
 
-function formatUtcTime(timestamp: string): string {
-  return new Date(timestamp).toISOString().slice(11, 19)
-}
-
-function formatUtcDateTime(timestamp: string): string {
-  const iso = new Date(timestamp).toISOString()
-  return `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)} ${iso.slice(11, 19)}`
-}
-
 export default function RegimesPage() {
   const { data: regimes, isLoading, isError } = useQuery<Regime[]>({
     queryKey: ['regimes'],
@@ -60,7 +52,7 @@ export default function RegimesPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
+      <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-bold text-white">Market Regimes</h1>
         <p className="text-sm text-white/50 mt-0.5">Current market state per asset</p>
       </div>
@@ -72,7 +64,7 @@ export default function RegimesPage() {
       )}
 
       {/* Asset Cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         {isLoading
           ? Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
           : ASSETS.map((asset) => {
@@ -108,7 +100,7 @@ export default function RegimesPage() {
                       <span className="text-xs text-white/60 whitespace-nowrap">{regime.confidence}%</span>
                     </div>
                     <p className="text-[11px] text-white/30">
-                      {formatUtcTime(regime.timestamp)}
+                      {formatSaoPauloTime(regime.timestamp)}
                     </p>
                   </div>
                 </Card>
@@ -155,7 +147,7 @@ export default function RegimesPage() {
                       <td className="px-4 py-3"><Badge variant={meta.variant}>{meta.label}</Badge></td>
                       <td className="px-4 py-3 text-white/70">{regime.confidence}%</td>
                       <td className="px-4 py-3 text-white/40 text-xs">
-                        {formatUtcDateTime(regime.timestamp)}
+                        {formatSaoPauloDateTime(regime.timestamp)}
                       </td>
                     </tr>
                   )

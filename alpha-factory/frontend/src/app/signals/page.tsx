@@ -5,6 +5,7 @@ import { Card, CardTitle, CardValue } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { SkeletonCard, SkeletonRow } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
+import { formatSaoPauloTime } from '@/lib/time'
 import { fetchSignals, generateSignals } from '@/utils/api'
 
 interface Signal {
@@ -29,10 +30,6 @@ function directionBadge(direction: Signal['direction']) {
 
 function normalizePercent(value: number): number {
   return Math.abs(value) <= 1 ? value * 100 : value
-}
-
-function formatUtcTime(timestamp: string): string {
-  return new Date(timestamp).toISOString().slice(11, 19)
 }
 
 function ConfidenceBar({ value }: { value: number }) {
@@ -169,7 +166,7 @@ export default function SignalsPage() {
                     <td className="px-4 py-3 text-right text-emerald-400/80 tabular-nums">{fmt(signal.tp1)}</td>
                     <td className="px-4 py-3 text-right text-red-400/80 tabular-nums">{fmt(signal.sl)}</td>
                     <td className="px-4 py-3 text-white/40 text-xs whitespace-nowrap">
-                      {formatUtcTime(signal.timestamp)}
+                      {formatSaoPauloTime(signal.timestamp)}
                     </td>
                   </tr>
                 ))
