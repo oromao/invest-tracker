@@ -146,7 +146,7 @@ class RagStore:
             asset=asset,
             timestamp=timestamp,
             regime=regime,
-            market_features_json=json.dumps(features),
+            features_json=json.dumps(features),
             context_summary=context_summary,
             trade_outcome=trade_outcome,
             risk_reward=risk_reward,
