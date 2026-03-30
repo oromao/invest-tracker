@@ -304,13 +304,13 @@ async def health():
         drift_status = {}
         for asset in settings.assets[:2]:
             for tf in ["1h", "4h"]:
-                key = f"alpha:drift:{asset}:{tf}"
+                key = f"alpha:monitor:drift:{asset.replace('/', '_')}:{tf}"
                 raw = await r.get(key)
                 if raw:
                     d = _json.loads(raw)
-                    if d.get("has_drift") or d.get("regime_unstable"):
+                    if d.get("drift_detected") or d.get("regime_unstable"):
                         drift_status[f"{asset}/{tf}"] = {
-                            "has_drift": d.get("has_drift"),
+                            "drift_detected": d.get("drift_detected"),
                             "regime_unstable": d.get("regime_unstable"),
                         }
         await r.aclose()

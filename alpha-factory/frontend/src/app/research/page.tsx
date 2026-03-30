@@ -22,7 +22,7 @@ interface Strategy {
   strategy_id: string
   name: string
   version: number
-  status: 'draft' | 'candidate' | 'active' | 'deprecated'
+  status: 'draft' | 'candidate' | 'active' | 'deprecated' | 'retired'
   params: Record<string, unknown>
   created_at: string
   updated_at: string
@@ -61,6 +61,7 @@ const STATUS_META: Record<Strategy['status'], { variant: StatusVariant; label: s
   candidate: { variant: 'warning', label: 'Candidate' },
   active: { variant: 'success', label: 'Active' },
   deprecated: { variant: 'danger', label: 'Deprecated' },
+  retired: { variant: 'danger', label: 'Retired' },
 }
 
 function humanizeBlocker(blocker: string): { label: string; tone: StatusVariant } {
@@ -118,6 +119,7 @@ export default function ResearchPage() {
       params: strategy.params ?? {},
       score: strategy.latest_score ?? 0,
       trades: Number(strategy.latest_metrics?.total_trades ?? 0),
+      displayStatus: strategy.lifecycle_state === 'retired' ? 'retired' : strategy.status,
     }))
     const filtered = normalized.filter((strategy) => {
       const q = search.trim().toLowerCase()
@@ -126,7 +128,7 @@ export default function ResearchPage() {
         strategy.strategy_id.toLowerCase().includes(q) ||
         strategy.name.toLowerCase().includes(q) ||
         (strategy.latest_reason ?? '').toLowerCase().includes(q)
-      const matchesStatus = statusFilter === 'all' || strategy.status === statusFilter
+      const matchesStatus = statusFilter === 'all' || strategy.displayStatus === statusFilter
       return matchesSearch && matchesStatus
     })
     const dir = sortDir === 'asc' ? 1 : -1
@@ -156,10 +158,11 @@ export default function ResearchPage() {
     setSortDir(key === 'updated_at' ? 'desc' : 'asc')
   }
 
-  const active = displayStrategies.filter((s) => s.status === 'active').length
-  const candidates = displayStrategies.filter((s) => s.status === 'candidate').length
-  const drafts = displayStrategies.filter((s) => s.status === 'draft').length
-  const deprecated = displayStrategies.filter((s) => s.status === 'deprecated').length
+  const active = displayStrategies.filter((s) => s.displayStatus === 'active').length
+  const candidates = displayStrategies.filter((s) => s.displayStatus === 'candidate').length
+  const drafts = displayStrategies.filter((s) => s.displayStatus === 'draft').length
+  const deprecated = displayStrategies.filter((s) => s.displayStatus === 'deprecated').length
+  const retired = displayStrategies.filter((s) => s.displayStatus === 'retired').length
   const total = displayStrategies.length
   const bestStrategies = (leaderboard ?? []).slice(0, 4)
   const leadingStrategy = bestStrategies[0]
@@ -198,6 +201,7 @@ export default function ResearchPage() {
         <MetricCard label="Candidates" value={candidates} tone="warning" />
         <MetricCard label="Total Strategies" value={total} tone="info" />
         <MetricCard label="Deprecated" value={deprecated} tone="danger" />
+        <MetricCard label="Retired" value={retired} tone="danger" />
       </div>
 
       <Surface
@@ -339,6 +343,7 @@ export default function ResearchPage() {
             <option value="candidate">Candidate</option>
             <option value="active">Active</option>
             <option value="deprecated">Deprecated</option>
+            <option value="retired">Retired</option>
           </select>
           <div className="flex gap-2">
             {([
@@ -377,7 +382,7 @@ export default function ResearchPage() {
         ) : (
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
             {displayStrategies.map((strategy) => {
-              const meta = STATUS_META[strategy.status]
+              const meta = STATUS_META[strategy.displayStatus as Strategy['status']]
               const paramsPreview = Object.entries(strategy.params)
                 .slice(0, 2)
                 .map(([k, v]) => `${k}=${v}`)
@@ -401,7 +406,7 @@ export default function ResearchPage() {
                     {paramsPreview || 'No parameters recorded'}
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {strategy.status === 'candidate' && (
+                    {strategy.displayStatus === 'candidate' && (
                       <button
                         onClick={() => promoteMutation.mutate(strategy.strategy_id)}
                         disabled={promoteMutation.isPending}
@@ -410,7 +415,7 @@ export default function ResearchPage() {
                         Promote
                       </button>
                     )}
-                    {strategy.status === 'active' && (
+                    {strategy.displayStatus === 'active' && (
                       <button
                         onClick={() => deprecateMutation.mutate(strategy.strategy_id)}
                         disabled={deprecateMutation.isPending}

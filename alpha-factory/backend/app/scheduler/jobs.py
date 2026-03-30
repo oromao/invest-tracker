@@ -215,10 +215,10 @@ async def _drift_coro() -> None:
         for tf in ["1h", "4h"]:
             try:
                 result = await monitor.run(asset, tf)
-                if result.has_drift or result.regime_unstable:
+                if result.drift_detected or result.regime_unstable:
                     logger.warning(
                         "Drift alert %s/%s: drift=%s regime_unstable=%s",
-                        asset, tf, result.has_drift, result.regime_unstable,
+                        asset, tf, result.drift_detected, result.regime_unstable,
                     )
             except Exception as exc:
                 logger.error("Drift monitor error %s/%s: %s", asset, tf, exc)
@@ -257,7 +257,21 @@ async def _watchdog_coro() -> None:
         r = aioredis.from_url(settings.redis_url, decode_responses=True)
         now = now_sao_paulo()
         stale = []
-        for job_id in ("ingest_job", "features_job", "regime_job", "signal_job", "research_job", "paper_update_job", "paper_decay_job"):
+        for job_id in (
+            "ingest_job",
+            "features_job",
+            "regime_job",
+            "label_job",
+            "research_job",
+            "signal_job",
+            "execution_job",
+            "sync_positions_job",
+            "audit_job",
+            "drift_job",
+            "paper_ingest_job",
+            "paper_update_job",
+            "paper_decay_job",
+        ):
             raw = await r.get(f"alpha:scheduler:heartbeat:{job_id}")
             if not raw:
                 stale.append(job_id)
@@ -293,8 +307,20 @@ async def _watchdog_coro() -> None:
         await _run_features_job()
     if "regime_job" in stale:
         await _run_regime_job()
+    if "label_job" in stale:
+        await _run_label_job()
     if "signal_job" in stale:
         await _run_signal_job()
+    if "execution_job" in stale:
+        await _run_execution_job()
+    if "sync_positions_job" in stale:
+        await _run_sync_positions_job()
+    if "audit_job" in stale:
+        await _run_audit_job()
+    if "drift_job" in stale:
+        await _run_drift_job()
+    if "paper_ingest_job" in stale:
+        await _run_paper_ingest_job()
     if "research_job" in stale:
         await _run_research_job()
     if "paper_update_job" in stale:
@@ -515,15 +541,22 @@ class AlphaScheduler:
 
     async def run_initial_jobs(self) -> None:
         """
-        Fire features + regime + signal jobs immediately at startup so the
-        system has fresh state without waiting for the first interval tick.
+        Prime the whole autonomous loop at startup so the system has fresh
+        state without waiting for the first interval tick.
         """
         logger.info("Running initial pipeline jobs at startup...")
+        await _run_ingest_job()
         await _run_features_job()
         await _run_regime_job()
+        await _run_label_job()
+        await _run_research_job()
         await _run_signal_job()
         await _run_execution_job()
         await _run_sync_positions_job()
+        await _run_paper_ingest_job()
+        await _run_paper_update_job()
+        await _run_paper_decay_job()
         await _run_audit_job()
+        await _run_drift_job()
         await _run_watchdog_job()
         logger.info("Initial pipeline jobs complete")

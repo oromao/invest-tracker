@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import async_session_factory
 from app.db.models import StrategyVersion, BacktestRun, BacktestTrade, BacktestMetric, StrategyVersionStatusEnum
@@ -117,6 +118,7 @@ class AlphaDiscoveryEngine:
                 await self.registry.promote_to_active(session, candidate["name"])
                 await session.commit()
                 logger.info("Promoted %s to ACTIVE (Exceptional performance)", candidate["name"])
+
     async def batch_promote_strategy_versions(self):
         """Periodically run a global promotion/deprecation check across all strategy_versions."""
         logger.info("Starting batch strategy promotion/deprecation check")

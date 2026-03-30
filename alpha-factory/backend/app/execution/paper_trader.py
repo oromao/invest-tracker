@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db.models import DirectionEnum, OHLCVBar, StrategyStatusEnum
 from app.db.session import AsyncSessionLocal
+from app.research.memory import StrategyMemoryStore
 from app.shared.time import now_sao_paulo
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,9 @@ def _redis():
 
 
 class PaperTrader:
+    def __init__(self) -> None:
+        self.memory = StrategyMemoryStore()
+
     # ── Redis helpers ──────────────────────────────────────────────────────
     async def _load_positions(self, r) -> List[Dict]:
         raw = await r.get(_KEY_POSITIONS)
@@ -374,13 +378,53 @@ class PaperTrader:
                 from app.registry.strategies import StrategyRegistry
                 registry = StrategyRegistry()
                 strat = await registry.update_status(
-                    session, strat_id, StrategyStatusEnum.candidate
+                    session, strat_id, StrategyStatusEnum.deprecated
                 )
                 if strat:
+                    latest_backtest_stmt = text(
+                        """
+                        SELECT b.asset, b.timeframe, b.sharpe, b.profit_factor, b.expectancy, b.max_drawdown,
+                               b.win_rate, b.total_trades, b.params_json
+                        FROM backtest_runs b
+                        JOIN strategies s ON s.id = b.strategy_id
+                        WHERE s.strategy_id = :strategy_id
+                        ORDER BY b.run_at DESC
+                        LIMIT 1
+                        """
+                    )
+                    latest_backtest = (await session.execute(latest_backtest_stmt, {"strategy_id": strat_id})).fetchone()
+                    metrics = {
+                        "sharpe": float(latest_backtest[2] or 0.0) if latest_backtest else 0.0,
+                        "profit_factor": float(latest_backtest[3] or 0.0) if latest_backtest else 0.0,
+                        "expectancy": float(latest_backtest[4] or 0.0) if latest_backtest else 0.0,
+                        "max_drawdown": float(latest_backtest[5] or 0.0) if latest_backtest else 0.0,
+                        "win_rate": float(latest_backtest[6] or 0.0) if latest_backtest else 0.0,
+                        "total_trades": int(latest_backtest[7] or 0) if latest_backtest else 0,
+                    }
+                    params = {}
+                    if latest_backtest and latest_backtest[6]:
+                        try:
+                            params = json.loads(latest_backtest[8])
+                        except Exception:
+                            params = {}
+                    asset = latest_backtest[0] if latest_backtest else "unknown"
+                    timeframe = latest_backtest[1] if latest_backtest else "paper"
+                    await self.memory.record_event(
+                        session,
+                        strategy=strat,
+                        asset=asset,
+                        timeframe=timeframe,
+                        event_type="retired",
+                        lifecycle_state="retired",
+                        score=metrics["sharpe"] + metrics["profit_factor"],
+                        metrics=metrics,
+                        params=params,
+                        reason=f"paper decay retirement: {reason}",
+                    )
                     await session.commit()
                     demoted += 1
                     logger.warning(
-                        "Strategy DEMOTED to candidate: %s  reason=%s",
+                        "Strategy RETIRED to deprecated: %s  reason=%s",
                         strat_id, reason,
                     )
 
