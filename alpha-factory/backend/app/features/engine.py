@@ -194,7 +194,8 @@ class FeatureEngine:
                 pg_insert(Feature)
                 .values(chunk)
                 .on_conflict_do_update(
-                    constraint="uq_features_asset_tf_ts_name",
+                    # Keep this aligned with the unique constraint defined on the table.
+                    constraint="uq_feature_asset_tf_ts_name",
                     set_={"value": pg_insert(Feature).excluded.value},
                 )
             )

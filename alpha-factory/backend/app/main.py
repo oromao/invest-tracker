@@ -16,11 +16,13 @@ from prometheus_client import Counter, Gauge, Histogram, make_asgi_app
 from app.config import settings
 from app.db.models import Base
 from app.db.session import engine
+from app.shared.time import ensure_timezone, now_sao_paulo
 
 # Structured log format — one JSON-ish line per record
 logging.basicConfig(
     level=logging.INFO,
     format='{"time":"%(asctime)s","logger":"%(name)s","level":"%(levelname)s","msg":"%(message)s"}',
+    datefmt="%Y-%m-%dT%H:%M:%S%z",
 )
 logger = logging.getLogger(__name__)
 
@@ -208,7 +210,7 @@ async def health():
         async with AsyncSessionLocal() as session:
             from app.db.models import OHLCVBar
             from sqlalchemy import desc, select as sa_select
-            now = datetime.now(tz=timezone.utc)
+            now = now_sao_paulo()
             freshness = {}
             for asset in settings.assets[:2]:  # check first 2 assets
                 stmt = (
@@ -221,8 +223,7 @@ async def health():
                 row = result.scalar_one_or_none()
                 if row:
                     ts = row
-                    if ts.tzinfo is None:
-                        ts = ts.replace(tzinfo=timezone.utc)
+                    ts = ensure_timezone(ts)
                     age_seconds = (now - ts).total_seconds()
                     DATA_FRESHNESS.labels(asset=asset).set(age_seconds)
                     freshness[asset] = f"{age_seconds / 3600:.1f}h ago"
@@ -292,7 +293,7 @@ async def health():
         "status": overall,
         "version": "0.2.0",
         "dry_run": settings.dry_run,
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "timestamp": now_sao_paulo().isoformat(),
         "checks": checks,
     }
 
@@ -305,7 +306,7 @@ async def api_status():
         "service": "alpha-factory",
         "version": "0.2.0",
         "dry_run": settings.dry_run,
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "timestamp": now_sao_paulo().isoformat(),
         "features": [
             "ohlcv_ingestion",
             "ohlcv_validation",

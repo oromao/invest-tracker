@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -82,6 +83,8 @@ async def list_backtests(
 
     result = await db.execute(stmt)
     runs = result.scalars().all()
+    if not runs:
+        return []
     return [_run_to_response(r) for r in runs]
 
 

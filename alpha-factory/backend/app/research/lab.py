@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -14,6 +13,7 @@ from app.backtest.runner import BacktestMetrics, BacktestRunner
 from app.config import settings
 from app.db.models import BacktestRun, OHLCVBar, Strategy, StrategyStatusEnum
 from app.db.session import AsyncSessionLocal
+from app.shared.time import ensure_timezone, now_sao_paulo
 from app.registry.strategies import StrategyRegistry
 
 logger = logging.getLogger(__name__)
@@ -279,10 +279,10 @@ class ResearchLab:
         start_date = ohlcv_df.index[0].to_pydatetime() if not ohlcv_df.empty else None
         end_date = ohlcv_df.index[-1].to_pydatetime() if not ohlcv_df.empty else None
 
-        if start_date and start_date.tzinfo is None:
-            start_date = start_date.replace(tzinfo=timezone.utc)
-        if end_date and end_date.tzinfo is None:
-            end_date = end_date.replace(tzinfo=timezone.utc)
+        if start_date:
+            start_date = ensure_timezone(start_date)
+        if end_date:
+            end_date = ensure_timezone(end_date)
 
         # Store regime breakdown alongside regular params
         params_with_meta = dict(params)
@@ -319,9 +319,9 @@ class ResearchLab:
 
         async with AsyncSessionLocal() as session:
             ohlcv_df = await self._load_ohlcv(session, asset, timeframe)
-            if ohlcv_df.empty or len(ohlcv_df) < 100:
-                logger.warning("Not enough data for research cycle %s/%s", asset, timeframe)
-                return {"asset": asset, "timeframe": timeframe, "error": "insufficient data"}
+        if ohlcv_df.empty or len(ohlcv_df) < 100:
+            logger.warning("Not enough data for research cycle %s/%s", asset, timeframe)
+            return {"asset": asset, "timeframe": timeframe, "error": "insufficient data"}
 
             features_df = await self._load_features_df(session, asset, timeframe)
             current_regime = await self._get_current_regime(session, asset, timeframe)

@@ -2,7 +2,6 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { format } from 'date-fns'
 import {
   LineChart,
   Line,
@@ -15,10 +14,12 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { SkeletonRow } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
+import { formatSaoPauloDateTime } from '@/lib/time'
+import { fetchBacktests, runBacktest } from '@/utils/api'
 
 interface BacktestRun {
-  id: string
-  strategy_id: string
+  id: string | number
+  strategy_id: string | number
   asset: string
   timeframe: string
   run_at: string
@@ -28,77 +29,8 @@ interface BacktestRun {
   win_rate: number
   expectancy: number
   total_trades: number
+  equity_curve?: { date: string; equity: number }[]
   equity_curve_json: { date: string; equity: number }[]
-}
-
-const MOCK_BACKTESTS: BacktestRun[] = [
-  {
-    id: '1',
-    strategy_id: 'momentum_v1',
-    asset: 'BTC/USDT',
-    timeframe: '4h',
-    run_at: new Date(Date.now() - 3600000).toISOString(),
-    sharpe: 1.82,
-    profit_factor: 2.1,
-    max_drawdown: 12.4,
-    win_rate: 0.58,
-    expectancy: 245.5,
-    total_trades: 142,
-    equity_curve_json: Array.from({ length: 30 }, (_, i) => ({
-      date: format(new Date(Date.now() - (29 - i) * 86400000), 'MM/dd'),
-      equity: 10000 * (1 + i * 0.02 + Math.sin(i) * 0.03),
-    })),
-  },
-  {
-    id: '2',
-    strategy_id: 'mean_reversion_v2',
-    asset: 'ETH/USDT',
-    timeframe: '1h',
-    run_at: new Date(Date.now() - 7200000).toISOString(),
-    sharpe: 0.72,
-    profit_factor: 1.4,
-    max_drawdown: 18.7,
-    win_rate: 0.61,
-    expectancy: 87.2,
-    total_trades: 289,
-    equity_curve_json: Array.from({ length: 30 }, (_, i) => ({
-      date: format(new Date(Date.now() - (29 - i) * 86400000), 'MM/dd'),
-      equity: 10000 * (1 + i * 0.01 + Math.cos(i * 0.5) * 0.05),
-    })),
-  },
-  {
-    id: '3',
-    strategy_id: 'breakout_v1',
-    asset: 'SOL/USDT',
-    timeframe: '1d',
-    run_at: new Date(Date.now() - 10800000).toISOString(),
-    sharpe: 0.31,
-    profit_factor: 1.1,
-    max_drawdown: 28.3,
-    win_rate: 0.42,
-    expectancy: 32.1,
-    total_trades: 67,
-    equity_curve_json: Array.from({ length: 30 }, (_, i) => ({
-      date: format(new Date(Date.now() - (29 - i) * 86400000), 'MM/dd'),
-      equity: 10000 * (1 + i * 0.003 - Math.sin(i * 0.8) * 0.04),
-    })),
-  },
-]
-
-async function fetchBacktests(): Promise<BacktestRun[]> {
-  const res = await fetch('/api/backtests')
-  if (!res.ok) throw new Error('Failed to fetch backtests')
-  return res.json()
-}
-
-async function runBacktest(params: { strategy_id: string; asset: string; timeframe: string }) {
-  const res = await fetch('/api/backtests/run', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  })
-  if (!res.ok) throw new Error('Failed to run backtest')
-  return res.json()
 }
 
 function sharpeBadge(sharpe: number) {
@@ -112,12 +44,11 @@ export default function BacktestsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [filterStrategy, setFilterStrategy] = useState<string>('all')
   const [showModal, setShowModal] = useState(false)
-  const [form, setForm] = useState({ strategy_id: '', asset: 'BTC/USDT', timeframe: '4h' })
+  const [form, setForm] = useState({ strategy_id: 'momentum_v1', asset: 'BTC/USDT', timeframe: '4h' })
 
   const { data: backtests, isLoading, isError } = useQuery<BacktestRun[]>({
     queryKey: ['backtests'],
     queryFn: fetchBacktests,
-    placeholderData: MOCK_BACKTESTS,
   })
 
   const runMutation = useMutation({
@@ -128,21 +59,25 @@ export default function BacktestsPage() {
     },
   })
 
-  const displayBacktests = backtests ?? MOCK_BACKTESTS
+  const displayBacktests = (backtests ?? []).map((bt) => ({
+    ...bt,
+    strategy_id: bt.strategy_id ?? 'unknown',
+    equity_curve_json: bt.equity_curve_json ?? bt.equity_curve ?? [],
+  }))
 
-  const strategies = Array.from(new Set(displayBacktests.map((b) => b.strategy_id)))
+  const strategies = Array.from(new Set(displayBacktests.map((b) => String(b.strategy_id))))
 
   const filtered =
     filterStrategy === 'all'
       ? displayBacktests
-      : displayBacktests.filter((b) => b.strategy_id === filterStrategy)
+      : displayBacktests.filter((b) => String(b.strategy_id) === filterStrategy)
 
-  const selected = displayBacktests.find((b) => b.id === selectedId)
+  const selected = displayBacktests.find((b) => String(b.id) === selectedId)
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Backtest Results</h1>
           <p className="text-sm text-white/50 mt-0.5">Strategy performance analysis</p>
@@ -157,12 +92,12 @@ export default function BacktestsPage() {
 
       {isError && (
         <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
-          Failed to fetch backtests from API — showing mock data.
+          Failed to fetch backtests from API — showing empty state.
         </div>
       )}
 
       {/* Filter */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
         <label className="text-sm text-white/50">Strategy:</label>
         <select
           value={filterStrategy}
@@ -211,11 +146,11 @@ export default function BacktestsPage() {
               ) : (
                 filtered.map((bt) => (
                   <tr
-                    key={bt.id}
-                    onClick={() => setSelectedId(selectedId === bt.id ? null : bt.id)}
+                    key={String(bt.id)}
+                    onClick={() => setSelectedId(selectedId === String(bt.id) ? null : String(bt.id))}
                     className={cn(
                       'border-b border-white/5 hover:bg-white/[0.02] transition-colors cursor-pointer',
-                      selectedId === bt.id && 'bg-blue-500/5'
+                      selectedId === String(bt.id) && 'bg-blue-500/5'
                     )}
                   >
                     <td className="px-4 py-3 font-medium text-white">{bt.strategy_id}</td>
@@ -227,7 +162,7 @@ export default function BacktestsPage() {
                     <td className="px-4 py-3 text-right text-white/70 tabular-nums">{(bt.win_rate * 100).toFixed(1)}%</td>
                     <td className="px-4 py-3 text-right text-white/70 tabular-nums">{bt.expectancy.toFixed(1)}</td>
                     <td className="px-4 py-3 text-right text-white/70 tabular-nums">{bt.total_trades}</td>
-                    <td className="px-4 py-3 text-white/40 text-xs">{format(new Date(bt.run_at), 'dd/MM HH:mm')}</td>
+                    <td className="px-4 py-3 text-white/40 text-xs">{formatSaoPauloDateTime(bt.run_at)}</td>
                   </tr>
                 ))
               )}

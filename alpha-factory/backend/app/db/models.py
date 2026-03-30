@@ -105,7 +105,7 @@ class MarketRegime(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     regime: Mapped[RegimeEnum] = mapped_column(Enum(RegimeEnum), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    features_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    features_json: Mapped[Optional[str]] = mapped_column("market_features_json", Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

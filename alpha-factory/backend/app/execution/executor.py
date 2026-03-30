@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import ccxt.async_support as ccxt
@@ -9,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db.models import DirectionEnum, Position, Signal, Trade
 from app.db.session import async_session_factory
+from app.shared.time import now_sao_paulo
 from app.risk.engine import RiskEngine, SignalInput, PortfolioState
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ class ExecutionEngine:
                 if not signal: continue
                 
                 # Check status: ignore if too old (> 15m)
-                now = datetime.now(tz=timezone.utc)
+                now = now_sao_paulo()
                 if (now - signal.timestamp).total_seconds() > 900:
                     continue
 
@@ -216,7 +216,7 @@ class ExecutionEngine:
             size=pos.size,
             pnl=pos.unrealized_pnl, 
             entry_time=pos.opened_at,
-            exit_time=datetime.now(tz=timezone.utc),
+            exit_time=now_sao_paulo(),
             strategy_id=str(pos.strategy_id or "ensemble")
         )
         session.add(trade)
@@ -281,7 +281,7 @@ class ExecutionEngine:
                             size=local_pos.size,
                             pnl=0.0,
                             entry_time=local_pos.opened_at,
-                            exit_time=datetime.now(tz=timezone.utc),
+                            exit_time=now_sao_paulo(),
                             strategy_id=str(local_pos.strategy_id or "reconciled")
                         )
                         session.add(trade)

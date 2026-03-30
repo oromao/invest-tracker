@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Strategy, StrategyStatusEnum
+from app.shared.time import now_sao_paulo
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class StrategyRegistry:
             logger.warning("Strategy %s not found", strategy_id)
             return None
         strat.status = new_status
-        strat.updated_at = datetime.now(tz=timezone.utc)
+        strat.updated_at = now_sao_paulo()
         await session.flush()
         return strat
 
@@ -75,14 +75,14 @@ class StrategyRegistry:
         await session.execute(
             update(Strategy)
             .where(Strategy.status == StrategyStatusEnum.active)
-            .values(status=StrategyStatusEnum.deprecated, updated_at=datetime.now(tz=timezone.utc))
+            .values(status=StrategyStatusEnum.deprecated, updated_at=now_sao_paulo())
         )
         # Promote target
         strat = await self.get_by_strategy_id(session, strategy_id)
         if strat is None:
             return None
         strat.status = StrategyStatusEnum.active
-        strat.updated_at = datetime.now(tz=timezone.utc)
+        strat.updated_at = now_sao_paulo()
         await session.flush()
         logger.info("Promoted strategy %s to active", strategy_id)
         return strat

@@ -10,6 +10,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from prometheus_client import Counter, Gauge
 
 from app.config import settings
+from app.shared.time import now_sao_paulo
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +262,7 @@ async def _run_paper_decay_job() -> None:
 
 class AlphaScheduler:
     def __init__(self) -> None:
-        self.scheduler = AsyncIOScheduler(timezone="UTC")
+        self.scheduler = AsyncIOScheduler(timezone="America/Sao_Paulo")
         self._setup_jobs()
 
     def _setup_jobs(self) -> None:

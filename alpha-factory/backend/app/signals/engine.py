@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import timedelta
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import select
@@ -17,6 +17,7 @@ from app.regime.detector import RegimeDetector
 from app.registry.strategies import StrategyRegistry
 from app.risk.engine import PortfolioState, RiskEngine, SignalInput
 from app.signals.rag import RagStore
+from app.shared.time import now_sao_paulo, ensure_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -211,8 +212,6 @@ class SignalEngine:
         Cooldown depends on timeframe (longer for higher) and regime (longer for choppy).
         """
         from sqlalchemy import desc
-        from datetime import timedelta
-        
         # Adaptive cooldown calculation
         # Base multiplier: 1m -> 1x, 1h -> 60x, etc.
         # But we use a log-scale or simple multiplier for 1800s base
@@ -229,7 +228,7 @@ class SignalEngine:
             
         final_cooldown = base_cooldown * tf_mult * regime_mult
         
-        cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=final_cooldown)
+        cutoff = now_sao_paulo() - timedelta(seconds=final_cooldown)
         stmt = select(Signal).where(
             Signal.asset == asset,
             Signal.direction == direction,
@@ -262,7 +261,7 @@ class SignalEngine:
                 elif timeframe.endswith("d"): tf_secs = int(timeframe[:-1]) * 86400
                 
                 max_delay = tf_secs * settings.risk_stale_data_threshold
-                delay = (datetime.now(timezone.utc) - feat_ts).total_seconds()
+                delay = (now_sao_paulo() - ensure_timezone(feat_ts)).total_seconds()
                 
                 if delay > max_delay:
                     logger.warning(
@@ -271,7 +270,7 @@ class SignalEngine:
                     )
                     # Return a NO_TRADE signal immediately
                     return Signal(
-                        asset=asset, timeframe=timeframe, timestamp=datetime.now(timezone.utc),
+                        asset=asset, timeframe=timeframe, timestamp=now_sao_paulo(),
                         direction=DirectionEnum.NO_TRADE, confidence=0.0,
                         explanation=f"VETO: Data stale by {delay:.0f}s"
                     )
@@ -385,7 +384,7 @@ class SignalEngine:
             )
 
             # 11. Persist signal
-            now = datetime.now(tz=timezone.utc)
+            now = now_sao_paulo()
             signal = Signal(
                 asset=asset,
                 timeframe=timeframe,

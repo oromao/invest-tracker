@@ -14,11 +14,11 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-      <body>
+    <html lang="pt-BR">
+      <body className="overflow-x-hidden">
         <Providers>
           <Sidebar />
-          <main className="md:ml-56 min-h-screen p-4 md:p-6 pt-16 md:pt-6">
+          <main className="md:ml-56 min-h-screen p-4 md:p-6 pt-16 md:pt-6 min-w-0">
             {children}
           </main>
         </Providers>

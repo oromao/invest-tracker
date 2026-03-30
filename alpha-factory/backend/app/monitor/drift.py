@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db.models import MarketRegime
 from app.db.session import AsyncSessionLocal
+from app.shared.time import now_sao_paulo
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,7 @@ async def _compute_regime_velocity(
     hours: int = 24,
 ) -> Tuple[float, bool]:
     """Count how many regime transitions occurred in the last `hours` hours."""
-    cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=hours)
+    cutoff = now_sao_paulo() - timedelta(hours=hours)
     stmt = (
         select(MarketRegime.regime)
         .where(
@@ -159,7 +160,7 @@ class DriftMonitor:
         result = DriftResult(
             asset=asset,
             timeframe=timeframe,
-            checked_at=datetime.now(tz=timezone.utc).isoformat(),
+            checked_at=now_sao_paulo().isoformat(),
         )
 
         async with AsyncSessionLocal() as session:

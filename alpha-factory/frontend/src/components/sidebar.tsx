@@ -66,7 +66,7 @@ export function Sidebar() {
     <>
       {/* Mobile hamburger button */}
       <button
-        className="md:hidden fixed top-4 left-4 z-[60] p-2 rounded-lg bg-[#0d0d0d] border border-white/10 text-white/70 hover:text-white"
+        className="md:hidden fixed top-4 left-4 z-[60] p-2 rounded-lg bg-[#0d0d0d] border border-white/10 text-white/70 hover:text-white shadow-lg shadow-black/20"
         onClick={() => setIsOpen(!isOpen)}
         aria-label="Toggle navigation"
       >
@@ -95,7 +95,7 @@ export function Sidebar() {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed left-0 top-0 h-full w-56 bg-[#0d0d0d] border-r border-white/8 flex flex-col z-[56] transition-transform duration-200',
+          'fixed left-0 top-0 h-full w-[18rem] max-w-[85vw] bg-[#0d0d0d] border-r border-white/8 flex flex-col z-[56] transition-transform duration-200 will-change-transform',
           // On mobile: hidden by default, slide in when open
           isOpen ? 'translate-x-0' : '-translate-x-full',
           // On desktop: always visible
@@ -118,7 +118,7 @@ export function Sidebar() {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 px-3 py-4 space-y-0.5">
+        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
           {navItems.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
             return (

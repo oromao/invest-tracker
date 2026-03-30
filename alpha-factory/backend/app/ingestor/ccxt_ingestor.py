@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
 from typing import List, Optional
 
 import ccxt.async_support as ccxt
@@ -14,6 +13,7 @@ from app.config import settings
 from app.data.validator import validate_and_clean_bars
 from app.db.models import OHLCVBar
 from app.db.session import AsyncSessionLocal
+from app.shared.time import ensure_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ class CCXTIngestor:
                     {
                         "asset": asset,
                         "timeframe": timeframe,
-                        "timestamp": datetime.fromtimestamp(ts / 1000, tz=timezone.utc),
+                        "timestamp": ensure_timezone(datetime.fromtimestamp(ts / 1000, tz=timezone.utc)),
                         "open": float(o),
                         "high": float(h),
                         "low": float(l),

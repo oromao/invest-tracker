@@ -1,11 +1,12 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { format } from 'date-fns'
 import { Card, CardTitle, CardValue } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { SkeletonCard, SkeletonRow } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
+import { formatSaoPauloTime } from '@/lib/time'
+import { fetchSignals, generateSignals } from '@/utils/api'
 
 interface Signal {
   id: string
@@ -21,81 +22,19 @@ interface Signal {
   timestamp: string
 }
 
-const MOCK_SIGNALS: Signal[] = [
-  {
-    id: '1',
-    asset: 'BTC/USDT',
-    direction: 'LONG',
-    confidence: 0.82,
-    entry_price: 67450.0,
-    tp1: 69000.0,
-    tp2: 71500.0,
-    sl: 65800.0,
-    regime: 'trend_bull',
-    explanation: 'Strong momentum with volume confirmation',
-    timestamp: new Date().toISOString(),
-  },
-  {
-    id: '2',
-    asset: 'ETH/USDT',
-    direction: 'SHORT',
-    confidence: 0.65,
-    entry_price: 3520.0,
-    tp1: 3400.0,
-    tp2: 3250.0,
-    sl: 3650.0,
-    regime: 'trend_bear',
-    explanation: 'Bearish divergence on 4H',
-    timestamp: new Date().toISOString(),
-  },
-  {
-    id: '3',
-    asset: 'BNB/USDT',
-    direction: 'NO_TRADE',
-    confidence: 0.35,
-    entry_price: 415.0,
-    tp1: null,
-    tp2: null,
-    sl: null,
-    regime: 'range',
-    explanation: 'Choppy market, no clear edge',
-    timestamp: new Date().toISOString(),
-  },
-  {
-    id: '4',
-    asset: 'SOL/USDT',
-    direction: 'LONG',
-    confidence: 0.74,
-    entry_price: 148.5,
-    tp1: 155.0,
-    tp2: 162.0,
-    sl: 142.0,
-    regime: 'trend_bull',
-    explanation: 'Breakout from consolidation zone',
-    timestamp: new Date().toISOString(),
-  },
-]
-
-async function fetchSignals(): Promise<Signal[]> {
-  const res = await fetch('/api/signals')
-  if (!res.ok) throw new Error('Failed to fetch signals')
-  return res.json()
-}
-
-async function generateSignals(): Promise<void> {
-  const res = await fetch('/api/signals/generate', { method: 'POST' })
-  if (!res.ok) throw new Error('Failed to generate signals')
-}
-
 function directionBadge(direction: Signal['direction']) {
   if (direction === 'LONG') return <Badge variant="success">LONG</Badge>
   if (direction === 'SHORT') return <Badge variant="danger">SHORT</Badge>
   return <Badge variant="default">NO TRADE</Badge>
 }
 
+function normalizePercent(value: number): number {
+  return Math.abs(value) <= 1 ? value * 100 : value
+}
+
 function ConfidenceBar({ value }: { value: number }) {
   // value is 0.0–1.0; display as percentage
-  const pct = Math.round(value * 100)
+  const pct = Math.round(normalizePercent(value))
   const color = pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-yellow-500' : 'bg-red-500'
   return (
     <div className="flex items-center gap-2">
@@ -118,16 +57,18 @@ export default function SignalsPage() {
   const { data: signals, isLoading, isError } = useQuery<Signal[]>({
     queryKey: ['signals'],
     queryFn: fetchSignals,
-    placeholderData: MOCK_SIGNALS,
     refetchInterval: 30_000,
   })
 
   const generateMutation = useMutation({
-    mutationFn: generateSignals,
+    mutationFn: () => generateSignals({ timeframe: '1h' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['signals'] }),
   })
 
-  const displaySignals = signals ?? MOCK_SIGNALS
+  const displaySignals = (signals ?? []).map((signal) => ({
+    ...signal,
+    confidence: normalizePercent(signal.confidence) / 100,
+  }))
 
   const total = displaySignals.length
   const longs = displaySignals.filter((s) => s.direction === 'LONG').length
@@ -168,7 +109,7 @@ export default function SignalsPage() {
 
       {isError && (
         <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
-          API unavailable — showing mock data.
+          API unavailable — showing empty state.
         </div>
       )}
 
@@ -225,7 +166,7 @@ export default function SignalsPage() {
                     <td className="px-4 py-3 text-right text-emerald-400/80 tabular-nums">{fmt(signal.tp1)}</td>
                     <td className="px-4 py-3 text-right text-red-400/80 tabular-nums">{fmt(signal.sl)}</td>
                     <td className="px-4 py-3 text-white/40 text-xs whitespace-nowrap">
-                      {format(new Date(signal.timestamp), 'HH:mm:ss')}
+                      {formatSaoPauloTime(signal.timestamp)}
                     </td>
                   </tr>
                 ))

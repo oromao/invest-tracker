@@ -1,10 +1,11 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { format } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardTitle } from '@/components/ui/card'
 import { SkeletonCard, SkeletonRow } from '@/components/ui/skeleton'
+import { formatSaoPauloDateTime, formatSaoPauloTime } from '@/lib/time'
+import { fetchRegimes } from '@/utils/api'
 
 interface Regime {
   asset: string
@@ -12,13 +13,6 @@ interface Regime {
   confidence: number
   timestamp: string
 }
-
-const MOCK_REGIMES: Regime[] = [
-  { asset: 'BTC', regime: 'trend_bull', confidence: 78, timestamp: new Date().toISOString() },
-  { asset: 'ETH', regime: 'trend_bear', confidence: 62, timestamp: new Date().toISOString() },
-  { asset: 'BNB', regime: 'range', confidence: 55, timestamp: new Date().toISOString() },
-  { asset: 'SOL', regime: 'high_vol', confidence: 70, timestamp: new Date().toISOString() },
-]
 
 type RegimeVariant = 'success' | 'danger' | 'info' | 'warning' | 'default'
 
@@ -30,23 +24,23 @@ const REGIME_META: Record<Regime['regime'], { label: string; variant: RegimeVari
   low_vol: { label: 'Low Vol', variant: 'default', color: 'text-white/50' },
 }
 
-async function fetchRegimes(): Promise<Regime[]> {
-  const res = await fetch('/api/regimes')
-  if (!res.ok) throw new Error('Failed to fetch regimes')
-  return res.json()
-}
+const ASSETS = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT']
 
-const ASSETS = ['BTC', 'ETH', 'BNB', 'SOL']
+function normalizeConfidence(value: number): number {
+  return Math.abs(value) <= 1 ? value * 100 : value
+}
 
 export default function RegimesPage() {
   const { data: regimes, isLoading, isError } = useQuery<Regime[]>({
     queryKey: ['regimes'],
     queryFn: fetchRegimes,
-    placeholderData: MOCK_REGIMES,
     refetchInterval: 30_000,
   })
 
-  const displayRegimes = regimes ?? MOCK_REGIMES
+  const displayRegimes = (regimes ?? []).map((regime) => ({
+    ...regime,
+    confidence: normalizeConfidence(regime.confidence),
+  }))
 
   // Latest regime per asset
   const latestByAsset = ASSETS.reduce<Record<string, Regime>>((acc, asset) => {
@@ -58,28 +52,36 @@ export default function RegimesPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
+      <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-bold text-white">Market Regimes</h1>
         <p className="text-sm text-white/50 mt-0.5">Current market state per asset</p>
       </div>
 
       {isError && (
         <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
-          Failed to fetch regimes from API — showing mock data.
+          Failed to fetch regimes from API — showing empty state.
         </div>
       )}
 
       {/* Asset Cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         {isLoading
           ? Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
           : ASSETS.map((asset) => {
               const regime = latestByAsset[asset]
-              if (!regime) return null
+              if (!regime) {
+                return (
+                  <Card key={asset}>
+                    <CardTitle>{asset.split('/')[0]}</CardTitle>
+                    <p className="mt-3 text-sm text-white/30">No regime data yet.</p>
+                  </Card>
+                )
+              }
               const meta = REGIME_META[regime.regime]
+              const label = asset.split('/')[0]
               return (
                 <Card key={asset}>
-                  <CardTitle>{asset}</CardTitle>
+                  <CardTitle>{label}</CardTitle>
                   <div className="mt-3 space-y-2">
                     <Badge variant={meta.variant}>{meta.label}</Badge>
                     <div className="flex items-center gap-2 mt-2">
@@ -98,7 +100,7 @@ export default function RegimesPage() {
                       <span className="text-xs text-white/60 whitespace-nowrap">{regime.confidence}%</span>
                     </div>
                     <p className="text-[11px] text-white/30">
-                      {format(new Date(regime.timestamp), 'HH:mm:ss')}
+                      {formatSaoPauloTime(regime.timestamp)}
                     </p>
                   </div>
                 </Card>
@@ -145,7 +147,7 @@ export default function RegimesPage() {
                       <td className="px-4 py-3"><Badge variant={meta.variant}>{meta.label}</Badge></td>
                       <td className="px-4 py-3 text-white/70">{regime.confidence}%</td>
                       <td className="px-4 py-3 text-white/40 text-xs">
-                        {format(new Date(regime.timestamp), 'dd/MM/yyyy HH:mm:ss')}
+                        {formatSaoPauloDateTime(regime.timestamp)}
                       </td>
                     </tr>
                   )

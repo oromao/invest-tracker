@@ -14,6 +14,7 @@ from app.config import settings
 from app.data.validator import validate_and_clean_bars
 from app.db.models import OHLCVBar
 from app.db.session import AsyncSessionLocal
+from app.shared.time import ensure_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ class BinanceWSIngestor:
         if asset is None:
             return
 
-        ts = datetime.fromtimestamp(int(kline["t"]) / 1000, tz=timezone.utc)
+        ts = ensure_timezone(datetime.fromtimestamp(int(kline["t"]) / 1000, tz=timezone.utc))
         bar = {
             "asset": asset,
             "timeframe": "1m",
