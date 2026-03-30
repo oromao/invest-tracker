@@ -1,10 +1,11 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardTitle, CardValue } from '@/components/ui/card'
-import { SkeletonCard, SkeletonRow } from '@/components/ui/skeleton'
+import { Card } from '@/components/ui/card'
+import { EmptyState, InlineStat, MetricCard, PageHeader, Surface, StatusPill } from '@/components/product-ui'
+import { SkeletonCard } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { formatSaoPauloDateTime } from '@/lib/time'
 import {
@@ -60,6 +61,16 @@ const STATUS_META: Record<Strategy['status'], { variant: StatusVariant; label: s
   candidate: { variant: 'warning', label: 'Candidate' },
   active: { variant: 'success', label: 'Active' },
   deprecated: { variant: 'danger', label: 'Deprecated' },
+}
+
+function humanizeBlocker(blocker: string): { label: string; tone: StatusVariant } {
+  const lower = blocker.toLowerCase()
+  if (lower.includes('trade')) return { label: `Trade count · ${blocker}`, tone: 'warning' }
+  if (lower.includes('drawdown') || lower.includes('risk')) return { label: `Risk · ${blocker}`, tone: 'danger' }
+  if (lower.includes('oos') || lower.includes('consistency') || lower.includes('profit') || lower.includes('score') || lower.includes('sharpe')) {
+    return { label: `Performance · ${blocker}`, tone: 'warning' }
+  }
+  return { label: blocker, tone: 'default' }
 }
 
 export default function ResearchPage() {
@@ -150,305 +161,272 @@ export default function ResearchPage() {
   const drafts = displayStrategies.filter((s) => s.status === 'draft').length
   const deprecated = displayStrategies.filter((s) => s.status === 'deprecated').length
   const total = displayStrategies.length
-  const bestStrategies = (leaderboard ?? []).slice(0, 5)
+  const bestStrategies = (leaderboard ?? []).slice(0, 4)
+  const leadingStrategy = bestStrategies[0]
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Research Lab</h1>
-          <p className="text-sm text-white/50 mt-0.5">Autonomous Strategy Discovery</p>
-        </div>
-        <button
-          onClick={() => researchMutation.mutate()}
-          disabled={researchMutation.isPending}
-          className={cn(
-            'px-4 py-2 rounded-lg text-sm font-medium transition-all',
-            researchMutation.isPending
-              ? 'bg-blue-500/30 text-blue-400/60 cursor-not-allowed'
-              : 'bg-blue-500 hover:bg-blue-600 text-white'
-          )}
-        >
-          {researchMutation.isPending ? (
-            <span className="flex items-center gap-2">
-              <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-              </svg>
-              Running…
-            </span>
-          ) : (
-            'Run Research Cycle'
-          )}
-        </button>
-      </div>
+      <PageHeader
+        eyebrow="Autonomous Research"
+        title="Strategy discovery and promotion control"
+        subtitle="Generate candidates, compare them against the current baseline, and surface exactly why a strategy is promoted, blocked, or deprecated."
+        action={
+          <button
+            onClick={() => researchMutation.mutate()}
+            disabled={researchMutation.isPending}
+            className={cn(
+              'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium transition-colors',
+              researchMutation.isPending
+                ? 'bg-blue-500/30 text-blue-300/60 cursor-not-allowed'
+                : 'bg-blue-500 text-white hover:bg-blue-600'
+            )}
+          >
+            {researchMutation.isPending ? 'Running…' : 'Run Research Cycle'}
+          </button>
+        }
+        status={<StatusPill tone={promotionStatus?.closest_to_promotion ? 'success' : 'warning'}>{promotionStatus?.closest_to_promotion ? 'Promotion eligible' : 'Promotion blocked'}</StatusPill>}
+      />
 
       {isError && (
-        <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
-          Failed to fetch strategies from API — showing empty state.
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          Failed to fetch strategies from API — showing the current empty or partial state.
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search strategy, reason or ID"
-          className="md:col-span-2 bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        />
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-          className="bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          <option value="all">All statuses</option>
-          <option value="draft">Draft</option>
-          <option value="candidate">Candidate</option>
-          <option value="active">Active</option>
-          <option value="deprecated">Deprecated</option>
-        </select>
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <MetricCard label="Active" value={active} tone="success" />
+        <MetricCard label="Candidates" value={candidates} tone="warning" />
+        <MetricCard label="Total Strategies" value={total} tone="info" />
+        <MetricCard label="Deprecated" value={deprecated} tone="danger" />
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
-        {isLoading ? (
-          Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
-        ) : (
-          <>
-            <Card>
-              <CardTitle>Active</CardTitle>
-              <CardValue className="text-emerald-400">{active}</CardValue>
-            </Card>
-            <Card>
-              <CardTitle>Candidates</CardTitle>
-              <CardValue className="text-yellow-400">{candidates}</CardValue>
-            </Card>
-            <Card>
-              <CardTitle>Total Strategies</CardTitle>
-              <CardValue>{total}</CardValue>
-            </Card>
-            <Card>
-              <CardTitle>Deprecated</CardTitle>
-              <CardValue className="text-red-400">{deprecated}</CardValue>
-            </Card>
-          </>
-        )}
-      </div>
-
-      <div className="bg-[#111111] border border-white/10 rounded-xl p-4">
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <div>
-            <h2 className="text-sm font-semibold text-white">Promotion Diagnostics</h2>
-            <p className="text-xs text-white/40 mt-0.5">Why the current leader is or is not being auto-promoted</p>
-          </div>
-          <Badge variant={promotionStatus?.closest_to_promotion ? 'success' : 'warning'}>
-            {promotionStatus?.closest_to_promotion ? 'Eligible' : 'Blocked'}
-          </Badge>
-        </div>
+      <Surface
+        title="Promotion diagnostics"
+        description="The candidate must beat the active baseline and pass the robust gates below."
+        action={<Badge variant={promotionStatus?.closest_to_promotion ? 'success' : 'warning'}>{promotionStatus?.closest_to_promotion ? 'Closest candidate' : 'Still blocked'}</Badge>}
+      >
         {!promotionStatus ? (
-          <div className="text-sm text-white/30">Loading promotion state…</div>
+          <div className="text-sm text-white/35">Loading promotion state…</div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-            <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-              <div className="text-white/35 text-xs uppercase">Active Baseline</div>
-              <div className="text-white font-semibold">{Number(promotionStatus.baseline_current_active_score ?? promotionStatus.baseline_proven_score ?? 0).toFixed(3)}</div>
-              <div className="text-white/35 text-xs mt-1">{promotionStatus.competition_mode || 'current_active_baseline'}</div>
-            </div>
-            <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-              <div className="text-white/35 text-xs uppercase">Top Candidate</div>
-              <div className="text-white font-semibold">{promotionStatus.target?.strategy_id ?? 'n/a'}</div>
-              <div className="text-white/35 text-xs mt-1">
-                score {Number(promotionStatus.target?.score ?? 0).toFixed(3)} · trades {Number(promotionStatus.target?.total_trades ?? 0)}
-              </div>
-            </div>
-            <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-              <div className="text-white/35 text-xs uppercase">Blockers</div>
-              <div className="text-white font-semibold">{promotionStatus.blockers?.length ?? 0}</div>
-              <div className="text-white/35 text-xs mt-1">
-                {(promotionStatus.blockers?.length ? promotionStatus.blockers : ['No blockers']).join(' • ')}
-              </div>
-            </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <InlineStat
+              label="Active baseline"
+              value={Number(promotionStatus.baseline_current_active_score ?? promotionStatus.baseline_proven_score ?? 0).toFixed(3)}
+              tone="info"
+            />
+            <InlineStat
+              label="Top candidate"
+              value={promotionStatus.target?.strategy_id ?? 'n/a'}
+              tone={promotionStatus.closest_to_promotion ? 'success' : 'warning'}
+            />
+            <InlineStat
+              label="Competition mode"
+              value={promotionStatus.competition_mode || 'current_active_baseline'}
+            />
           </div>
         )}
-      </div>
-
-      {/* Best Strategies */}
-      <div className="bg-[#111111] border border-white/10 rounded-xl p-4">
-        <div className="flex items-center justify-between gap-3 mb-4">
-          <div>
-            <h2 className="text-sm font-semibold text-white">Best Strategies</h2>
-            <p className="text-xs text-white/40 mt-0.5">Ranked by robust backtest score and lifecycle progress</p>
+        <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr]">
+          <div className="rounded-2xl border border-white/8 bg-white/[0.02] p-4">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/35">Gate outcome</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(promotionStatus?.blockers?.length ? promotionStatus.blockers : ['No blockers']).map((blocker: string) => {
+                const meta = humanizeBlocker(blocker)
+                return (
+                  <Badge key={blocker} variant={meta.tone}>
+                    {meta.label}
+                  </Badge>
+                )
+              })}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-white/8 bg-white/[0.02] p-4">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/35">Target snapshot</div>
+            <div className="mt-3 grid gap-2 text-sm text-white/55">
+              <div>
+                Strategy: <span className="text-white">{promotionStatus?.target?.strategy_id ?? 'n/a'}</span>
+              </div>
+              <div>
+                Score: <span className="text-white">{Number(promotionStatus?.target?.score ?? 0).toFixed(3)}</span>
+              </div>
+              <div>
+                Trades: <span className="text-white">{Number(promotionStatus?.target?.total_trades ?? 0)}</span>
+              </div>
+              <div>
+                OOS Sharpe: <span className="text-white">{Number(promotionStatus?.target?.oos_sharpe ?? 0).toFixed(2)}</span>
+              </div>
+            </div>
           </div>
         </div>
+      </Surface>
+
+      <Surface
+        title="Best strategies"
+        description="Ranked by robust score, not just win rate."
+      >
         {bestStrategies.length === 0 ? (
-          <div className="text-sm text-white/30">No ranked strategies yet. Run the research cycle.</div>
+          <EmptyState title="No ranked strategies yet" description="Run the research cycle to populate the leaderboard." />
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <div className="grid gap-3 lg:grid-cols-2">
             {bestStrategies.map((strategy, index) => (
-              <div key={strategy.strategy_id} className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="text-xs text-white/40">#{index + 1}</div>
-                    <div className="font-medium text-white">{strategy.name}</div>
-                    <div className="text-[11px] text-white/40 font-mono">{strategy.strategy_id}</div>
+              <Card key={strategy.strategy_id} className="bg-white/[0.02]">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-[11px] uppercase tracking-[0.2em] text-white/35">#{index + 1}</div>
+                    <div className="mt-1 truncate text-base font-medium text-white">{strategy.name}</div>
+                    <div className="mt-1 truncate font-mono text-[11px] text-white/40">{strategy.strategy_id}</div>
                   </div>
                   <Badge variant={strategy.lifecycle_state === 'paper' || strategy.status === 'active' ? 'success' : strategy.status === 'candidate' ? 'warning' : 'default'}>
                     {strategy.lifecycle_state || strategy.status}
                   </Badge>
                 </div>
-                <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                  <div className="rounded-md bg-black/20 p-2">
-                    <div className="text-white/30">Score</div>
-                    <div className="text-white font-semibold">{(strategy.latest_score ?? 0).toFixed(3)}</div>
-                  </div>
-                  <div className="rounded-md bg-black/20 p-2">
-                    <div className="text-white/30">Sharpe</div>
-                    <div className="text-white font-semibold">{Number(strategy.latest_metrics?.sharpe ?? 0).toFixed(2)}</div>
-                  </div>
-                  <div className="rounded-md bg-black/20 p-2">
-                    <div className="text-white/30">PF</div>
-                    <div className="text-white font-semibold">{Number(strategy.latest_metrics?.profit_factor ?? 0).toFixed(2)}</div>
-                  </div>
-                  <div className="rounded-md bg-black/20 p-2">
-                    <div className="text-white/30">Trades</div>
-                    <div className="text-white font-semibold">{Number(strategy.latest_metrics?.total_trades ?? 0)}</div>
-                  </div>
+                <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+                  <InlineStat label="Score" value={Number(strategy.latest_score ?? 0).toFixed(3)} tone="info" />
+                  <InlineStat label="Sharpe" value={Number(strategy.latest_metrics?.sharpe ?? 0).toFixed(2)} />
+                  <InlineStat label="PF" value={Number(strategy.latest_metrics?.profit_factor ?? 0).toFixed(2)} />
+                  <InlineStat label="Trades" value={Number(strategy.latest_metrics?.total_trades ?? 0)} />
                 </div>
-                <div className="mt-3 text-xs text-white/45">
+                <p className="mt-4 text-sm leading-6 text-white/45">
                   {strategy.latest_reason || 'No evaluation note recorded'}
-                </div>
-              </div>
+                </p>
+              </Card>
             ))}
           </div>
         )}
-      </div>
+      </Surface>
 
-      {/* Pipeline Flow */}
-      <div className="bg-[#111111] border border-white/10 rounded-xl p-4">
-        <h2 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-4">Strategy Pipeline</h2>
-        <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-2">
+      <Surface
+        title="Lifecycle mix"
+        description="Where the current population sits right now."
+      >
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {[
-            { label: 'Draft', count: drafts, color: 'bg-white/10 text-white/50 border-white/10' },
-            { label: 'Candidate', count: candidates, color: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20' },
-            { label: 'Active', count: active, color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' },
-            { label: 'Deprecated', count: deprecated, color: 'bg-red-500/15 text-red-400 border-red-500/20' },
-          ].map((stage, i) => (
-            <div key={stage.label} className="flex flex-col md:flex-row items-stretch md:items-center gap-2 flex-1">
-              <div className={cn('flex-1 rounded-lg border px-3 py-2.5 text-center', stage.color)}>
-                <div className="text-lg font-bold">{stage.count}</div>
-                <div className="text-xs opacity-80">{stage.label}</div>
+            { label: 'Draft', count: drafts, tone: 'default' as const },
+            { label: 'Candidate', count: candidates, tone: 'warning' as const },
+            { label: 'Active', count: active, tone: 'success' as const },
+            { label: 'Deprecated', count: deprecated, tone: 'danger' as const },
+          ].map((stage) => (
+            <div key={stage.label} className="rounded-2xl border border-white/8 bg-white/[0.02] p-4">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-white/35">{stage.label}</div>
+              <div className={cn('mt-2 text-2xl font-semibold tabular-nums', stage.tone === 'success' ? 'text-emerald-400' : stage.tone === 'warning' ? 'text-yellow-400' : stage.tone === 'danger' ? 'text-red-400' : 'text-white')}>
+                {stage.count}
               </div>
-              {i < 3 && (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4 text-white/20 flex-shrink-0 self-center rotate-90 md:rotate-0">
-                  <path strokeLinecap="round" d="M9 18l6-6-6-6" />
-                </svg>
-              )}
             </div>
           ))}
         </div>
-      </div>
+        <div className="mt-4 text-xs leading-6 text-white/40">
+          The research loop keeps searching after promotion. Weak strategies can still be deprecated automatically when recent evidence degrades.
+        </div>
+      </Surface>
 
-      {/* Strategies Table */}
-      <div className="bg-[#111111] border border-white/10 rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-white/8">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-white">Strategies</h2>
-            <div className="flex flex-wrap items-center gap-1 text-[11px] text-white/35">
-              {([
-                ['name', 'Name'],
-                ['status', 'Status'],
-                ['score', 'Score'],
-                ['trades', 'Trades'],
-                ['updated_at', 'Updated'],
-              ] as const).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => toggleSort(key)}
-                  className="rounded-md border border-white/10 px-2 py-1 hover:text-white hover:border-white/20 transition-colors"
-                >
-                  {label}
-                  {sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
-                </button>
-              ))}
-            </div>
+      <Surface
+        title="Strategy inventory"
+        description="Search, sort, and act on the current strategy set."
+      >
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[1.4fr_0.7fr_0.7fr]">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search strategy, reason or ID…"
+            className="rounded-xl border border-white/10 bg-[#0f0f0f] px-3 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            className="rounded-xl border border-white/10 bg-[#0f0f0f] px-3 py-3 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="all">All statuses</option>
+            <option value="draft">Draft</option>
+            <option value="candidate">Candidate</option>
+            <option value="active">Active</option>
+            <option value="deprecated">Deprecated</option>
+          </select>
+          <div className="flex gap-2">
+            {([
+              ['name', 'Name'],
+              ['status', 'Status'],
+              ['score', 'Score'],
+              ['trades', 'Trades'],
+              ['updated_at', 'Updated'],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => toggleSort(key)}
+                className="flex-1 rounded-xl border border-white/10 px-2 py-3 text-xs uppercase tracking-[0.18em] text-white/45 transition-colors hover:border-white/20 hover:text-white"
+              >
+                {label}
+                {sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+              </button>
+            ))}
           </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-white/[0.02]">
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">ID</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">Name</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">Version</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">Params</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">Updated</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                Array.from({ length: 4 }).map((_, i) => <SkeletonRow key={i} />)
-              ) : displayStrategies.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-white/30">
-                    <div className="flex flex-col items-center gap-2">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-8 h-8 text-white/20">
-                        <path strokeLinecap="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
-                      </svg>
-                      <span>No strategies found — run a research cycle</span>
+
+        {isLoading ? (
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <SkeletonCard key={i} />
+            ))}
+          </div>
+        ) : displayStrategies.length === 0 ? (
+          <div className="mt-4">
+            <EmptyState
+              title="No strategies found"
+              description="Run a research cycle or clear the filters to surface strategies."
+            />
+          </div>
+        ) : (
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            {displayStrategies.map((strategy) => {
+              const meta = STATUS_META[strategy.status]
+              const paramsPreview = Object.entries(strategy.params)
+                .slice(0, 2)
+                .map(([k, v]) => `${k}=${v}`)
+                .join(' · ')
+              return (
+                <Card key={strategy.strategy_id} className="bg-white/[0.02]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-base font-medium text-white">{strategy.name}</div>
+                      <div className="mt-1 font-mono text-[11px] text-white/40 break-all">{strategy.strategy_id}</div>
                     </div>
-                  </td>
-                </tr>
-              ) : (
-                displayStrategies.map((strategy) => {
-                  const meta = STATUS_META[strategy.status]
-                  const paramsPreview = Object.entries(strategy.params)
-                    .slice(0, 2)
-                    .map(([k, v]) => `${k}=${v}`)
-                    .join(', ')
-                  return (
-                    <tr key={strategy.strategy_id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
-                      <td className="px-4 py-3 font-mono text-xs text-white/60">{strategy.strategy_id}</td>
-                      <td className="px-4 py-3 font-medium text-white">{strategy.name}</td>
-                      <td className="px-4 py-3 text-white/50">v{strategy.version}</td>
-                      <td className="px-4 py-3"><Badge variant={meta.variant}>{meta.label}</Badge></td>
-                      <td className="px-4 py-3 font-mono text-xs text-white/40 max-w-[180px] truncate">{paramsPreview}</td>
-                      <td className="px-4 py-3 text-white/40 text-xs">
-                        {formatSaoPauloDateTime(strategy.updated_at)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          {strategy.status === 'candidate' && (
-                            <button
-                              onClick={() => promoteMutation.mutate(strategy.strategy_id)}
-                              disabled={promoteMutation.isPending}
-                              className="px-2.5 py-1 rounded text-xs font-medium bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors border border-emerald-500/20"
-                            >
-                              Promote
-                            </button>
-                          )}
-                          {strategy.status === 'active' && (
-                            <button
-                              onClick={() => deprecateMutation.mutate(strategy.strategy_id)}
-                              disabled={deprecateMutation.isPending}
-                              className="px-2.5 py-1 rounded text-xs font-medium bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors border border-red-500/20"
-                            >
-                              Deprecate
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                    <Badge variant={meta.variant}>{meta.label}</Badge>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+                    <InlineStat label="Version" value={`v${strategy.version}`} />
+                    <InlineStat label="Score" value={Number(strategy.latest_score ?? 0).toFixed(3)} tone="info" />
+                    <InlineStat label="Trades" value={Number(strategy.latest_metrics?.total_trades ?? 0)} />
+                    <InlineStat label="Updated" value={formatSaoPauloDateTime(strategy.updated_at)} />
+                  </div>
+                  <div className="mt-4 rounded-xl border border-white/8 bg-white/[0.02] p-3 text-sm text-white/50">
+                    {paramsPreview || 'No parameters recorded'}
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {strategy.status === 'candidate' && (
+                      <button
+                        onClick={() => promoteMutation.mutate(strategy.strategy_id)}
+                        disabled={promoteMutation.isPending}
+                        className="rounded-full border border-emerald-500/20 bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-60"
+                      >
+                        Promote
+                      </button>
+                    )}
+                    {strategy.status === 'active' && (
+                      <button
+                        onClick={() => deprecateMutation.mutate(strategy.strategy_id)}
+                        disabled={deprecateMutation.isPending}
+                        className="rounded-full border border-red-500/20 bg-red-500/15 px-3 py-2 text-xs font-medium text-red-300 hover:bg-red-500/25 disabled:opacity-60"
+                      >
+                        Deprecate
+                      </button>
+                    )}
+                    <Badge variant="default">{strategy.latest_reason || 'No evaluation note'}</Badge>
+                  </div>
+                </Card>
+              )
+            })}
+          </div>
+        )}
+      </Surface>
     </div>
   )
 }

@@ -1,18 +1,12 @@
 'use client'
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { Badge } from '@/components/ui/badge'
-import { SkeletonRow } from '@/components/ui/skeleton'
+import { Card } from '@/components/ui/card'
+import { EmptyState, InlineStat, MetricCard, PageHeader, Surface, StatusPill } from '@/components/product-ui'
+import { SkeletonCard } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { formatSaoPauloDateTime } from '@/lib/time'
 import { fetchBacktests, runBacktest } from '@/utils/api'
@@ -33,10 +27,10 @@ interface BacktestRun {
   equity_curve_json: { date: string; equity: number }[]
 }
 
-function sharpeBadge(sharpe: number) {
-  if (sharpe >= 1) return <span className="text-emerald-400 font-semibold">{sharpe.toFixed(2)}</span>
-  if (sharpe >= 0.5) return <span className="text-yellow-400 font-semibold">{sharpe.toFixed(2)}</span>
-  return <span className="text-red-400 font-semibold">{sharpe.toFixed(2)}</span>
+function sharpeTone(sharpe: number) {
+  if (sharpe >= 1) return 'success'
+  if (sharpe >= 0.5) return 'warning'
+  return 'danger'
 }
 
 export default function BacktestsPage() {
@@ -62,11 +56,15 @@ export default function BacktestsPage() {
     },
   })
 
-  const displayBacktests = useMemo(() => (backtests ?? []).map((bt) => ({
-    ...bt,
-    strategy_id: bt.strategy_id ?? 'unknown',
-    equity_curve_json: bt.equity_curve_json ?? bt.equity_curve ?? [],
-  })), [backtests])
+  const displayBacktests = useMemo(
+    () =>
+      (backtests ?? []).map((bt) => ({
+        ...bt,
+        strategy_id: bt.strategy_id ?? 'unknown',
+        equity_curve_json: bt.equity_curve_json ?? bt.equity_curve ?? [],
+      })),
+    [backtests]
+  )
 
   const strategies = useMemo(() => Array.from(new Set(displayBacktests.map((b) => String(b.strategy_id)))), [displayBacktests])
 
@@ -113,270 +111,187 @@ export default function BacktestsPage() {
       return
     }
     setSortKey(key)
-    setSortDir(key === 'run_at' ? 'desc' : 'desc')
+    setSortDir('desc')
   }
 
   const selected = displayBacktests.find((b) => String(b.id) === selectedId)
+  const latest = filtered[0]
+  const sortOptions = [
+    ['strategy_id', 'Strategy'],
+    ['asset', 'Asset'],
+    ['run_at', 'Date'],
+    ['sharpe', 'Sharpe'],
+    ['profit_factor', 'PF'],
+    ['max_drawdown', 'Max DD'],
+    ['win_rate', 'Win Rate'],
+    ['expectancy', 'Expectancy'],
+    ['total_trades', 'Trades'],
+  ] as const
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Backtest Results</h1>
-          <p className="text-sm text-white/50 mt-0.5">Strategy performance analysis</p>
-        </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-500 hover:bg-blue-600 text-white transition-colors"
-        >
-          Run Backtest
-        </button>
-      </div>
+      <PageHeader
+        eyebrow="Backtests"
+        title="Performance evidence"
+        subtitle="Each result includes the key trading metrics and a drill-down into the equity curve for the selected run."
+        action={
+          <button
+            onClick={() => setShowModal(true)}
+            className="inline-flex items-center justify-center rounded-full bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600"
+          >
+            Run Backtest
+          </button>
+        }
+        status={<StatusPill tone={latest ? sharpeTone(latest.sharpe) : 'default'}>{latest ? `Best Sharpe ${latest.sharpe.toFixed(2)}` : 'No runs yet'}</StatusPill>}
+      />
 
       {isError && (
-        <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
-          Failed to fetch backtests from API — showing empty state.
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          Failed to fetch backtests from API — showing the current empty or partial state.
         </div>
       )}
 
-      {/* Filter */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-        <label className="text-sm text-white/50">Strategy:</label>
-        <select
-          value={filterStrategy}
-          onChange={(e) => setFilterStrategy(e.target.value)}
-          className="bg-[#111] border border-white/10 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          <option value="all">All Strategies</option>
-          {strategies.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search strategy, asset or timeframe"
-          className="flex-1 bg-[#111] border border-white/10 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-white/25"
-        />
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <MetricCard label="Runs" value={filtered.length} tone="info" />
+        <MetricCard label="Best Sharpe" value={latest ? latest.sharpe.toFixed(2) : 'n/a'} tone={latest ? sharpeTone(latest.sharpe) : 'default'} />
+        <MetricCard label="Best PF" value={latest ? latest.profit_factor.toFixed(2) : 'n/a'} tone="success" />
+        <MetricCard label="Best Trades" value={latest ? latest.total_trades : 0} />
       </div>
 
-      {/* Table */}
-      <div className="bg-[#111111] border border-white/10 rounded-xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-white/[0.02]">
-                {[
-                  ['strategy_id', 'Strategy'],
-                  ['asset', 'Asset'],
-                  ['run_at', 'Date'],
-                  ['sharpe', 'Sharpe'],
-                  ['profit_factor', 'PF'],
-                  ['max_drawdown', 'Max DD'],
-                  ['win_rate', 'Win Rate'],
-                  ['expectancy', 'Expectancy'],
-                  ['total_trades', 'Trades'],
-                ].map(([key, label]) => {
-                  const isNumeric = ['sharpe', 'profit_factor', 'max_drawdown', 'win_rate', 'expectancy', 'total_trades'].includes(key)
-                  return (
-                  <th
-                    key={key}
-                    className={cn(
-                      'px-4 py-3 text-xs font-medium text-white/40 uppercase tracking-wider',
-                      isNumeric ? 'text-right' : 'text-left'
-                    )}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => toggleSort(key as typeof sortKey)}
-                      className="inline-flex items-center gap-1 hover:text-white transition-colors"
-                    >
-                      {label}
-                      {sortKey === key && <span>{sortDir === 'asc' ? '↑' : '↓'}</span>}
-                    </button>
-                  </th>
-                  )
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} />)
-              ) : filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={10} className="px-4 py-12 text-center text-white/30">
-                    <div className="flex flex-col items-center gap-2">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-8 h-8 text-white/20">
-                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-                      </svg>
-                      <span>No backtest results found</span>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((bt) => (
-                  <tr
-                    key={String(bt.id)}
-                    onClick={() => setSelectedId(selectedId === String(bt.id) ? null : String(bt.id))}
-                    className={cn(
-                      'border-b border-white/5 hover:bg-white/[0.02] transition-colors cursor-pointer',
-                      selectedId === String(bt.id) && 'bg-blue-500/5'
-                    )}
-                  >
-                    <td className="px-4 py-3 font-medium text-white">{bt.strategy_id}</td>
-                    <td className="px-4 py-3 text-white/70">{bt.asset}</td>
-                    <td className="px-4 py-3"><Badge variant="default">{bt.timeframe}</Badge></td>
-                    <td className="px-4 py-3 text-right tabular-nums">{sharpeBadge(bt.sharpe)}</td>
-                    <td className="px-4 py-3 text-right text-white/70 tabular-nums">{bt.profit_factor.toFixed(2)}</td>
-                    <td className="px-4 py-3 text-right text-red-400/80 tabular-nums">{bt.max_drawdown.toFixed(1)}%</td>
-                    <td className="px-4 py-3 text-right text-white/70 tabular-nums">{(bt.win_rate * 100).toFixed(1)}%</td>
-                    <td className="px-4 py-3 text-right text-white/70 tabular-nums">{bt.expectancy.toFixed(1)}</td>
-                    <td className="px-4 py-3 text-right text-white/70 tabular-nums">{bt.total_trades}</td>
-                    <td className="px-4 py-3 text-white/40 text-xs">{formatSaoPauloDateTime(bt.run_at)}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+      <Surface title="Filters" description="Narrow by strategy or free text.">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[0.9fr_1.2fr]">
+          <select
+            value={filterStrategy}
+            onChange={(e) => setFilterStrategy(e.target.value)}
+            className="rounded-xl border border-white/10 bg-[#0f0f0f] px-3 py-3 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="all">All strategies</option>
+            {strategies.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search strategy, asset or timeframe…"
+            className="rounded-xl border border-white/10 bg-[#0f0f0f] px-3 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
         </div>
-      </div>
+      </Surface>
 
-      {/* Equity Curve Detail Panel */}
-      {selected && (
-        <div className="bg-[#111111] border border-white/10 rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-white">
-              Equity Curve — {selected.strategy_id} / {selected.asset}
-            </h3>
+      <Surface title="Backtest results" description="High-signal summary cards with optional deeper drill-down.">
+        <div className="mb-4 flex flex-wrap gap-2 text-[11px] text-white/35">
+          {sortOptions.map(([key, label]) => (
             <button
-              onClick={() => setSelectedId(null)}
-              className="text-white/40 hover:text-white/70 transition-colors"
+              key={key}
+              type="button"
+              onClick={() => toggleSort(key)}
+              className="rounded-full border border-white/10 px-3 py-2 uppercase tracking-[0.18em] transition-colors hover:border-white/20 hover:text-white"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
-                <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              {label}
+              {sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
             </button>
+          ))}
+        </div>
+
+        {isLoading ? (
+          <div className="grid gap-3 lg:grid-cols-2">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <SkeletonCard key={i} />
+            ))}
           </div>
-          <div className="h-48">
+        ) : filtered.length === 0 ? (
+          <EmptyState title="No backtest results found" description="Run a backtest to populate the performance board." />
+        ) : (
+          <div className="grid gap-3 lg:grid-cols-2">
+            {filtered.map((bt) => (
+              <Card
+                key={String(bt.id)}
+                onClick={() => setSelectedId(selectedId === String(bt.id) ? null : String(bt.id))}
+                className={cn(
+                  'cursor-pointer bg-white/[0.02] transition-colors',
+                  selectedId === String(bt.id) && 'ring-1 ring-blue-500/30'
+                )}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-base font-medium text-white">{bt.strategy_id}</div>
+                    <div className="mt-1 text-sm text-white/50">{bt.asset} · {bt.timeframe}</div>
+                  </div>
+                  <Badge variant="default">{formatSaoPauloDateTime(bt.run_at)}</Badge>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+                  <InlineStat label="Sharpe" value={bt.sharpe.toFixed(2)} tone={sharpeTone(bt.sharpe)} />
+                  <InlineStat label="PF" value={bt.profit_factor.toFixed(2)} tone="success" />
+                  <InlineStat label="Max DD" value={`${bt.max_drawdown.toFixed(1)}%`} tone="danger" />
+                  <InlineStat label="Trades" value={bt.total_trades} />
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+                  <InlineStat label="Win Rate" value={`${(bt.win_rate * 100).toFixed(1)}%`} />
+                  <InlineStat label="Expectancy" value={bt.expectancy.toFixed(1)} />
+                  <InlineStat label="Run Date" value={formatSaoPauloDateTime(bt.run_at)} />
+                  <InlineStat label="Leader" value={bt.strategy_id} />
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </Surface>
+
+      {selected && (
+        <Surface title="Equity curve" description={`${selected.strategy_id} · ${selected.asset}`}>
+          <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={selected.equity_curve_json}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={(v) => `$${(v / 1000).toFixed(1)}k`}
-                />
+              <LineChart data={selected.equity_curve_json || []}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.45)', fontSize: 11 }} minTickGap={32} />
+                <YAxis tick={{ fill: 'rgba(255,255,255,0.45)', fontSize: 11 }} width={42} />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#1a1a1a',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: '8px',
-                    color: '#ededed',
-                    fontSize: 12,
-                  }}
-                  formatter={(value: number) => [`$${value.toFixed(2)}`, 'Equity']}
+                  contentStyle={{ background: '#111', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, color: '#fff' }}
                 />
-                <Line
-                  type="monotone"
-                  dataKey="equity"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4, fill: '#3b82f6' }}
-                />
+                <Line type="monotone" dataKey="equity" stroke="#60a5fa" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </Surface>
       )}
 
-      {/* Run Backtest Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-[#111111] border border-white/10 rounded-xl p-6 w-full max-w-md space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold text-white">Run Backtest</h2>
-              <button
-                onClick={() => setShowModal(false)}
-                className="text-white/40 hover:text-white/70 transition-colors"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
-                  <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-white/50 block mb-1">Strategy ID</label>
-                <input
-                  type="text"
-                  value={form.strategy_id}
-                  onChange={(e) => setForm({ ...form, strategy_id: e.target.value })}
-                  placeholder="e.g. momentum_v1"
-                  className="w-full bg-black/30 border border-white/10 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-white/20"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-white/50 block mb-1">Asset</label>
-                <select
-                  value={form.asset}
-                  onChange={(e) => setForm({ ...form, asset: e.target.value })}
-                  className="w-full bg-black/30 border border-white/10 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
-                  {['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT'].map((a) => (
-                    <option key={a} value={a}>{a}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-white/50 block mb-1">Timeframe</label>
-                <select
-                  value={form.timeframe}
-                  onChange={(e) => setForm({ ...form, timeframe: e.target.value })}
-                  className="w-full bg-black/30 border border-white/10 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
-                  {['15m', '1h', '4h', '1d'].map((tf) => (
-                    <option key={tf} value={tf}>{tf}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {runMutation.isError && (
-              <p className="text-red-400 text-xs">Failed to run backtest. Please try again.</p>
-            )}
-
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                onClick={() => setShowModal(false)}
-                className="px-4 py-2 text-sm text-white/50 hover:text-white transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => runMutation.mutate(form)}
-                disabled={runMutation.isPending || !form.strategy_id}
-                className={cn(
-                  'px-4 py-2 rounded-lg text-sm font-medium transition-all',
-                  runMutation.isPending || !form.strategy_id
-                    ? 'bg-blue-500/30 text-blue-400/60 cursor-not-allowed'
-                    : 'bg-blue-500 hover:bg-blue-600 text-white'
-                )}
-              >
-                {runMutation.isPending ? 'Running…' : 'Run'}
-              </button>
-            </div>
+        <Surface title="Run new backtest" description="Launch a new test with real runtime inputs.">
+          <div className="grid gap-3 md:grid-cols-3">
+            <input
+              value={form.strategy_id}
+              onChange={(e) => setForm((current) => ({ ...current, strategy_id: e.target.value }))}
+              className="rounded-xl border border-white/10 bg-[#0f0f0f] px-3 py-3 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <input
+              value={form.asset}
+              onChange={(e) => setForm((current) => ({ ...current, asset: e.target.value }))}
+              className="rounded-xl border border-white/10 bg-[#0f0f0f] px-3 py-3 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <input
+              value={form.timeframe}
+              onChange={(e) => setForm((current) => ({ ...current, timeframe: e.target.value }))}
+              className="rounded-xl border border-white/10 bg-[#0f0f0f] px-3 py-3 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
           </div>
-        </div>
+          <div className="mt-4 flex gap-2">
+            <button
+              onClick={() => runMutation.mutate(form)}
+              className="rounded-full bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600"
+            >
+              {runMutation.isPending ? 'Running…' : 'Run'}
+            </button>
+            <button
+              onClick={() => setShowModal(false)}
+              className="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/5"
+            >
+              Cancel
+            </button>
+          </div>
+        </Surface>
       )}
     </div>
   )

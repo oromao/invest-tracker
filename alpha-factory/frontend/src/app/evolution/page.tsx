@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardTitle, CardValue } from '@/components/ui/card'
+import { EmptyState, InlineStat, MetricCard, PageHeader, Surface, StatusPill } from '@/components/product-ui'
 import { SkeletonCard } from '@/components/ui/skeleton'
 import { formatSaoPauloDateTime } from '@/lib/time'
 import { fetchEvolutionTimeline } from '@/utils/api'
@@ -34,6 +34,20 @@ interface EvolutionCycle {
   created_at: string
 }
 
+function humanizeBlocker(blocker: string): { label: string; tone: 'warning' | 'danger' | 'info' } {
+  const lower = blocker.toLowerCase()
+  if (lower.includes('drawdown') || lower.includes('risk') || lower.includes('loss')) {
+    return { label: `Risk · ${blocker}`, tone: 'danger' }
+  }
+  if (lower.includes('trade') || lower.includes('score') || lower.includes('profit') || lower.includes('sharpe') || lower.includes('consistency') || lower.includes('oos')) {
+    return { label: `Performance · ${blocker}`, tone: 'warning' }
+  }
+  if (lower.includes('data') || lower.includes('fresh') || lower.includes('stale')) {
+    return { label: `Data · ${blocker}`, tone: 'info' }
+  }
+  return { label: blocker, tone: 'warning' }
+}
+
 export default function EvolutionPage() {
   const [asset, setAsset] = useState('all')
   const [timeframe, setTimeframe] = useState('all')
@@ -54,149 +68,156 @@ export default function EvolutionPage() {
   const replacementCount = cycles?.filter((c) => c.leader_changed).length ?? 0
   const promotions = cycles?.filter((c) => c.promotion_succeeded).length ?? 0
   const blockers = cycles?.reduce((acc, c) => acc + (c.promotion_blockers?.length ?? 0), 0) ?? 0
+  const latestCycle = cycles?.[0]
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Evolution Timeline</h1>
-          <p className="text-sm text-white/50 mt-0.5">Cycle-by-cycle strategy replacement proof</p>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-white/40">
-          <Badge variant="success">Current leader: {currentLeader}</Badge>
-        </div>
+      <PageHeader
+        eyebrow="Autonomous Evolution"
+        title="Strategy replacement timeline"
+        subtitle="Each cycle records the baseline, strongest candidate, blockers, and whether the active leader actually changed."
+        status={<StatusPill tone={replacementCount ? 'success' : 'warning'}>{replacementCount ? 'Replacement observed' : 'No replacement yet'}</StatusPill>}
+      />
+
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
+        <MetricCard label="Leader Changes" value={replacementCount} tone={replacementCount ? 'success' : 'default'} />
+        <MetricCard label="Promotions" value={promotions} tone="success" />
+        <MetricCard label="Blockers" value={blockers} tone="warning" />
+        <MetricCard label="Tracked Assets" value={assets.length} tone="info" />
+        <MetricCard label="Current Leader" value={currentLeader} note={latestCycle ? formatSaoPauloDateTime(latestCycle.cycle_at) : 'n/a'} />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
-        {isLoading ? (
-          Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
-        ) : (
-          <>
-            <Card>
-              <CardTitle>Leader Changes</CardTitle>
-              <CardValue className="text-emerald-400">{replacementCount}</CardValue>
-            </Card>
-            <Card>
-              <CardTitle>Promotions</CardTitle>
-              <CardValue className="text-blue-400">{promotions}</CardValue>
-            </Card>
-            <Card>
-              <CardTitle>Blockers</CardTitle>
-              <CardValue className="text-yellow-400">{blockers}</CardValue>
-            </Card>
-            <Card>
-              <CardTitle>Tracked Assets</CardTitle>
-              <CardValue>{assets.length}</CardValue>
-            </Card>
-          </>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <select
-          value={asset}
-          onChange={(e) => setAsset(e.target.value)}
-          className="bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          <option value="all">All assets</option>
-          {assets.map((a) => (
-            <option key={a} value={a}>
-              {a}
-            </option>
-          ))}
-        </select>
-        <select
-          value={timeframe}
-          onChange={(e) => setTimeframe(e.target.value)}
-          className="bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          <option value="all">All timeframes</option>
-          {['1h', '4h', '1d'].map((tf) => (
-            <option key={tf} value={tf}>
-              {tf}
-            </option>
-          ))}
-        </select>
-        <div className="bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-xs text-white/50">
-          Timeline is ordered by Sao Paulo time and includes promotion/deprecation blockers.
+      <Surface
+        title="Timeline Filters"
+        description="Narrow the evolution history by asset and timeframe."
+      >
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <select
+            value={asset}
+            onChange={(e) => setAsset(e.target.value)}
+            className="rounded-xl border border-white/10 bg-[#0f0f0f] px-3 py-3 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="all">All assets</option>
+            {assets.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </select>
+          <select
+            value={timeframe}
+            onChange={(e) => setTimeframe(e.target.value)}
+            className="rounded-xl border border-white/10 bg-[#0f0f0f] px-3 py-3 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="all">All timeframes</option>
+            {['1h', '4h', '1d'].map((tf) => (
+              <option key={tf} value={tf}>
+                {tf}
+              </option>
+            ))}
+          </select>
+          <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-3 text-xs leading-6 text-white/55">
+            Cycle data is persisted in São Paulo time and shows honest promotion/denial evidence for each run.
+          </div>
         </div>
-      </div>
+      </Surface>
 
       {isError && (
-        <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
           Failed to fetch evolution timeline.
         </div>
       )}
 
-      <div className="space-y-3">
+      <Surface
+        title="Recent Cycles"
+        description="Leader change, candidate strength, blockers, and deprecations in one place."
+      >
         {isLoading ? (
-          Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="rounded-xl border border-white/10 bg-[#111111] p-4 animate-pulse h-32" />
-          ))
-        ) : (cycles ?? []).length === 0 ? (
-          <div className="rounded-xl border border-white/10 bg-[#111111] p-6 text-sm text-white/35">
-            No evolution cycles yet. Run research cycles to record replacements and blockers.
+          <div className="grid gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <SkeletonCard key={i} />
+            ))}
           </div>
+        ) : (cycles ?? []).length === 0 ? (
+          <EmptyState
+            title="No cycles yet"
+            description="Run the research loop to create evolution records and replacement evidence."
+          />
         ) : (
-          (cycles ?? []).map((cycle) => (
-            <div key={cycle.id} className="rounded-xl border border-white/10 bg-[#111111] p-4">
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={cycle.leader_changed ? 'success' : 'default'}>
-                      {cycle.leader_changed ? 'Leader changed' : 'Leader held'}
-                    </Badge>
-                    <Badge variant={cycle.promotion_succeeded ? 'success' : cycle.promotion_attempted ? 'warning' : 'default'}>
-                      {cycle.promotion_succeeded ? 'Promotion succeeded' : cycle.promotion_attempted ? 'Promotion blocked' : 'No promotion'}
-                    </Badge>
+          <div className="space-y-3">
+            {(cycles ?? []).map((cycle) => (
+              <article key={cycle.id} className="rounded-[1.35rem] border border-white/10 bg-[#0f0f0f] p-4 md:p-5">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusPill tone={cycle.leader_changed ? 'success' : 'default'}>
+                        {cycle.leader_changed ? 'Leader changed' : 'Leader held'}
+                      </StatusPill>
+                      <StatusPill tone={cycle.promotion_succeeded ? 'success' : cycle.promotion_attempted ? 'warning' : 'default'}>
+                        {cycle.promotion_succeeded ? 'Promoted' : cycle.promotion_attempted ? 'Blocked' : 'No promotion'}
+                      </StatusPill>
+                      <Badge variant="default">{cycle.asset}</Badge>
+                      <Badge variant="default">{cycle.timeframe}</Badge>
+                    </div>
+                    <h3 className="mt-3 text-lg font-semibold text-white text-balance">
+                      {cycle.previous_active_strategy_id === cycle.current_active_strategy_id
+                        ? 'Leader held the line'
+                        : 'Leader replacement recorded'}
+                    </h3>
+                    <p className="mt-1 text-sm leading-6 text-white/50 text-pretty">
+                      {cycle.leader_change_reason || 'No leader change recorded'}
+                    </p>
                   </div>
-                  <div className="mt-2 font-semibold text-white">
-                    {cycle.asset} · {cycle.timeframe}
-                  </div>
-                  <div className="text-xs text-white/40">{formatSaoPauloDateTime(cycle.cycle_at)}</div>
+                  <div className="text-xs text-white/35">{formatSaoPauloDateTime(cycle.cycle_at)}</div>
                 </div>
-                <div className="text-xs text-white/45 max-w-xl">
-                  {cycle.leader_change_reason || 'No leader change recorded'}
-                </div>
-              </div>
 
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
-                <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-                  <div className="text-white/35 text-xs uppercase">Baseline</div>
-                  <div className="text-white font-semibold">{cycle.baseline_active_strategy_id ?? 'n/a'}</div>
-                  <div className="text-white/35 text-xs mt-1">{Number(cycle.baseline_active_score ?? 0).toFixed(3)}</div>
+                <div className="mt-4 grid gap-3 md:grid-cols-4">
+                  <InlineStat label="Baseline" value={cycle.baseline_active_strategy_id ?? 'n/a'} />
+                  <InlineStat label="Candidate" value={cycle.top_candidate_strategy_id ?? 'n/a'} />
+                  <InlineStat label="Current Leader" value={cycle.current_active_strategy_id ?? 'n/a'} tone="success" />
+                  <InlineStat label="Score Delta" value={cycle.baseline_active_score != null && cycle.top_candidate_score != null ? (cycle.top_candidate_score - cycle.baseline_active_score).toFixed(3) : 'n/a'} tone={cycle.promotion_succeeded ? 'success' : 'warning'} />
                 </div>
-                <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-                  <div className="text-white/35 text-xs uppercase">Top Candidate</div>
-                  <div className="text-white font-semibold">{cycle.top_candidate_strategy_id ?? 'n/a'}</div>
-                  <div className="text-white/35 text-xs mt-1">{Number(cycle.top_candidate_score ?? 0).toFixed(3)}</div>
-                </div>
-                <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-                  <div className="text-white/35 text-xs uppercase">Current Leader</div>
-                  <div className="text-white font-semibold">{cycle.current_active_strategy_id ?? 'n/a'}</div>
-                  <div className="text-white/35 text-xs mt-1">{cycle.competition_mode || 'current_active_baseline'}</div>
-                </div>
-                <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-                  <div className="text-white/35 text-xs uppercase">Blockers</div>
-                  <div className="text-white font-semibold">{cycle.promotion_blockers.length}</div>
-                  <div className="text-white/35 text-xs mt-1">
-                    {(cycle.promotion_blockers.length ? cycle.promotion_blockers : ['No blockers']).join(' • ')}
+
+                <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr]">
+                  <div className="rounded-2xl border border-white/8 bg-white/[0.02] p-4">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/35">Promotion blockers</div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {(cycle.promotion_blockers.length ? cycle.promotion_blockers : ['No blockers']).map((blocker) => {
+                        const meta = humanizeBlocker(blocker)
+                        return (
+                          <Badge key={blocker} variant={meta.tone}>
+                            {meta.label}
+                          </Badge>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-white/8 bg-white/[0.02] p-4">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/35">Lifecycle proof</div>
+                    <div className="mt-3 grid gap-2 text-sm text-white/55">
+                      <div>Previous leader: <span className="text-white">{cycle.previous_active_strategy_id ?? 'n/a'}</span></div>
+                      <div>Current leader: <span className="text-white">{cycle.current_active_strategy_id ?? 'n/a'}</span></div>
+                      <div>Competition mode: <span className="text-white">{cycle.competition_mode || 'current_active_baseline'}</span></div>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="mt-4 flex flex-wrap gap-2 text-xs">
-                {cycle.deprecated_strategy_ids.map((id) => (
-                  <Badge key={id} variant="danger">
-                    Deprecated: {id}
-                  </Badge>
-                ))}
-                {!cycle.deprecated_strategy_ids.length && <Badge variant="default">No deprecations</Badge>}
-              </div>
-            </div>
-          ))
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {cycle.deprecated_strategy_ids.length ? (
+                    cycle.deprecated_strategy_ids.map((id) => (
+                      <Badge key={id} variant="danger">
+                        Deprecated {id}
+                      </Badge>
+                    ))
+                  ) : (
+                    <Badge variant="default">No deprecations</Badge>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
         )}
-      </div>
+      </Surface>
     </div>
   )
 }

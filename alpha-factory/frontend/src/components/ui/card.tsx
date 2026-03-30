@@ -1,16 +1,17 @@
-import { type ReactNode } from 'react'
+import { type HTMLAttributes, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
-interface CardProps {
+interface CardProps extends HTMLAttributes<HTMLDivElement> {
   className?: string
   children: ReactNode
 }
 
-export function Card({ className, children }: CardProps) {
+export function Card({ className, children, ...props }: CardProps) {
   return (
     <div
+      {...props}
       className={cn(
-        'bg-[#111111] border border-white/10 rounded-xl p-4',
+        'rounded-[1.35rem] border border-white/10 bg-[#111111] p-4',
         className
       )}
     >
@@ -19,25 +20,25 @@ export function Card({ className, children }: CardProps) {
   )
 }
 
-export function CardHeader({ className, children }: CardProps) {
+export function CardHeader({ className, children, ...props }: CardProps) {
   return (
-    <div className={cn('mb-3', className)}>
+    <div {...props} className={cn('mb-3', className)}>
       {children}
     </div>
   )
 }
 
-export function CardTitle({ className, children }: CardProps) {
+export function CardTitle({ className, children, ...props }: CardProps) {
   return (
-    <h3 className={cn('text-sm font-semibold text-white/60 uppercase tracking-wider', className)}>
+    <h3 {...props} className={cn('text-sm font-semibold uppercase tracking-wider text-white/60', className)}>
       {children}
     </h3>
   )
 }
 
-export function CardValue({ className, children }: CardProps) {
+export function CardValue({ className, children, ...props }: CardProps) {
   return (
-    <div className={cn('text-2xl font-bold text-white mt-1', className)}>
+    <div {...props} className={cn('mt-1 text-2xl font-bold text-white', className)}>
       {children}
     </div>
   )

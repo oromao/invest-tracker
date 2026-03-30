@@ -1,19 +1,19 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Card, CardTitle, CardValue } from '@/components/ui/card'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
-import { SkeletonCard, SkeletonRow } from '@/components/ui/skeleton'
+import { EmptyState, InlineStat, MetricCard, PageHeader, Surface, StatusPill } from '@/components/product-ui'
+import { SkeletonCard } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
-import { formatSaoPauloTime } from '@/lib/time'
+import { formatSaoPauloDateTime, formatSaoPauloTime } from '@/lib/time'
 import { fetchSignals, generateSignals } from '@/utils/api'
 
 interface Signal {
   id: string
   asset: string
   direction: 'LONG' | 'SHORT' | 'NO_TRADE'
-  confidence: number   // 0.0–1.0 from API
+  confidence: number
   entry_price: number | null
   tp1: number | null
   tp2: number | null
@@ -34,12 +34,11 @@ function normalizePercent(value: number): number {
 }
 
 function ConfidenceBar({ value }: { value: number }) {
-  // value is 0.0–1.0; display as percentage
   const pct = Math.round(normalizePercent(value))
   const color = pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-yellow-500' : 'bg-red-500'
   return (
     <div className="flex items-center gap-2">
-      <div className="w-16 h-1.5 bg-white/10 rounded-full overflow-hidden">
+      <div className="h-1.5 w-full max-w-28 overflow-hidden rounded-full bg-white/10">
         <div className={cn('h-full rounded-full', color)} style={{ width: `${pct}%` }} />
       </div>
       <span className="text-xs text-white/70">{pct}%</span>
@@ -118,6 +117,14 @@ export default function SignalsPage() {
   const longs = displaySignals.filter((s) => s.direction === 'LONG').length
   const shorts = displaySignals.filter((s) => s.direction === 'SHORT').length
   const noTrades = displaySignals.filter((s) => s.direction === 'NO_TRADE').length
+  const latestSignal = displaySignals[0]
+  const sortOptions = [
+    ['asset', 'Asset'],
+    ['direction', 'Direction'],
+    ['confidence', 'Confidence'],
+    ['regime', 'Regime'],
+    ['timestamp', 'Time'],
+  ] as const
 
   const toggleSort = (key: typeof sortKey) => {
     if (sortKey === key) {
@@ -130,154 +137,139 @@ export default function SignalsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-white">Alpha Factory</h1>
-          <p className="text-sm text-white/50 mt-0.5">Autonomous Signal Engine</p>
-        </div>
-        <button
-          onClick={() => generateMutation.mutate()}
-          disabled={generateMutation.isPending}
-          className={cn(
-            'px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap',
-            generateMutation.isPending
-              ? 'bg-blue-500/30 text-blue-400/60 cursor-not-allowed'
-              : 'bg-blue-500 hover:bg-blue-600 text-white'
-          )}
-        >
-          {generateMutation.isPending ? (
-            <span className="flex items-center gap-2">
-              <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-              </svg>
-              Generating…
-            </span>
-          ) : (
-            'Generate Signals'
-          )}
-        </button>
-      </div>
+      <PageHeader
+        eyebrow="Real-Time Signals"
+        title="Signal engine"
+        subtitle="Readable live signals with confidence, regime context, and exact freshness — optimized for mobile and desktop."
+        action={
+          <button
+            onClick={() => generateMutation.mutate()}
+            disabled={generateMutation.isPending}
+            className={cn(
+              'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap',
+              generateMutation.isPending
+                ? 'bg-blue-500/30 text-blue-300/60 cursor-not-allowed'
+                : 'bg-blue-500 hover:bg-blue-600 text-white'
+            )}
+          >
+            {generateMutation.isPending ? 'Generating…' : 'Generate Signals'}
+          </button>
+        }
+        status={<StatusPill tone={latestSignal?.direction === 'LONG' ? 'success' : latestSignal?.direction === 'SHORT' ? 'danger' : 'default'}>{latestSignal?.direction ?? 'NO SIGNAL'}</StatusPill>}
+      />
 
       {isError && (
-        <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
-          API unavailable — showing empty state.
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          API unavailable — showing the current empty or partial state.
         </div>
       )}
 
-      {/* Stat Cards — 2 cols on mobile, 4 on md+ */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <MetricCard label="Total" value={total} />
+        <MetricCard label="Long" value={longs} tone="success" />
+        <MetricCard label="Short" value={shorts} tone="danger" />
+        <MetricCard label="No Trade" value={noTrades} tone="default" />
+      </div>
+
+      <Surface title="Filters" description="Search by asset, direction, or regime.">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search asset, regime, direction…"
+            className="rounded-xl border border-white/10 bg-[#0f0f0f] px-3 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-blue-500 md:col-span-2"
+          />
+          <select
+            value={directionFilter}
+            onChange={(e) => setDirectionFilter(e.target.value as typeof directionFilter)}
+            className="rounded-xl border border-white/10 bg-[#0f0f0f] px-3 py-3 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="all">All directions</option>
+            <option value="LONG">LONG</option>
+            <option value="SHORT">SHORT</option>
+            <option value="NO_TRADE">NO TRADE</option>
+          </select>
+          <select
+            value={regimeFilter}
+            onChange={(e) => setRegimeFilter(e.target.value)}
+            className="rounded-xl border border-white/10 bg-[#0f0f0f] px-3 py-3 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="all">All regimes</option>
+            {availableRegimes.map((regime) => (
+              <option key={regime} value={regime}>
+                {regime}
+              </option>
+            ))}
+          </select>
+        </div>
+      </Surface>
+
+      <Surface
+        title="Active signals"
+        description="Signals are presented as compact cards on mobile and read like a decision board instead of a raw table."
+      >
+        <div className="mb-4 flex flex-wrap gap-2 text-[11px] text-white/35">
+          {sortOptions.map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => toggleSort(key)}
+                className="rounded-full border border-white/10 px-3 py-2 uppercase tracking-[0.18em] transition-colors hover:border-white/20 hover:text-white"
+              >
+                {label}
+                {sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+              </button>
+            ))}
+        </div>
+
         {isLoading ? (
-          Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
+          <div className="grid gap-3 lg:grid-cols-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <SkeletonCard key={i} />
+            ))}
+          </div>
+        ) : displaySignals.length === 0 ? (
+          <EmptyState
+            title="No signals yet"
+            description="Generate signals to populate the board with real, regime-aware output."
+          />
         ) : (
-          <>
-            <Card><CardTitle>Total</CardTitle><CardValue>{total}</CardValue></Card>
-            <Card><CardTitle>Long</CardTitle><CardValue className="text-emerald-400">{longs}</CardValue></Card>
-            <Card><CardTitle>Short</CardTitle><CardValue className="text-red-400">{shorts}</CardValue></Card>
-            <Card><CardTitle>No Trade</CardTitle><CardValue className="text-white/50">{noTrades}</CardValue></Card>
-          </>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {displaySignals.map((signal) => (
+              <article key={signal.id} className="rounded-[1.35rem] border border-white/10 bg-[#0f0f0f] p-4 md:p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.2em] text-white/35">{signal.asset}</div>
+                    <div className="mt-1 text-base font-semibold text-white">{signal.regime ?? 'unknown regime'}</div>
+                  </div>
+                  {directionBadge(signal.direction)}
+                </div>
+
+                <div className="mt-4 grid gap-2 md:grid-cols-3">
+                  <InlineStat label="Confidence" value={<ConfidenceBar value={signal.confidenceScore / 100} />} tone={signal.confidenceScore >= 70 ? 'success' : signal.confidenceScore >= 40 ? 'warning' : 'danger'} />
+                  <InlineStat label="Entry" value={fmt(signal.entry_price)} />
+                  <InlineStat label="Time" value={formatSaoPauloTime(signal.timestamp)} />
+                </div>
+
+                <div className="mt-4 grid gap-2 md:grid-cols-3">
+                  <InlineStat label="TP1" value={fmt(signal.tp1)} tone="success" />
+                  <InlineStat label="TP2" value={fmt(signal.tp2)} tone="success" />
+                  <InlineStat label="SL" value={fmt(signal.sl)} tone="danger" />
+                </div>
+
+                <div className="mt-4 rounded-xl border border-white/8 bg-white/[0.02] p-3 text-sm leading-6 text-white/55">
+                  {signal.explanation || 'No signal explanation recorded yet.'}
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-white/45">
+                  <Badge variant="default">Updated {formatSaoPauloDateTime(signal.timestamp)}</Badge>
+                  <Badge variant="default">{signal.regime ?? 'n/a'}</Badge>
+                </div>
+              </article>
+            ))}
+          </div>
         )}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search asset, regime, direction"
-          className="md:col-span-2 bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        />
-        <select
-          value={directionFilter}
-          onChange={(e) => setDirectionFilter(e.target.value as typeof directionFilter)}
-          className="bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          <option value="all">All directions</option>
-          <option value="LONG">LONG</option>
-          <option value="SHORT">SHORT</option>
-          <option value="NO_TRADE">NO TRADE</option>
-        </select>
-        <select
-          value={regimeFilter}
-          onChange={(e) => setRegimeFilter(e.target.value)}
-          className="bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          <option value="all">All regimes</option>
-          {availableRegimes.map((regime) => (
-            <option key={regime} value={regime}>{regime}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Signals Table — scrollable on mobile */}
-      <div className="bg-[#111111] border border-white/10 rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-white/8">
-          <h2 className="text-sm font-semibold text-white">Active Signals</h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[640px]">
-            <thead>
-              <tr className="bg-white/[0.02]">
-                {[
-                  ['asset', 'Asset'],
-                  ['direction', 'Direction'],
-                  ['confidence', 'Conf'],
-                  ['regime', 'Regime'],
-                  ['timestamp', 'Time'],
-                ].map(([key, label]) => (
-                  <th key={key} className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">
-                    <button
-                      type="button"
-                      onClick={() => toggleSort(key as typeof sortKey)}
-                      className="inline-flex items-center gap-1 hover:text-white transition-colors"
-                    >
-                      {label}
-                      {sortKey === key && <span>{sortDir === 'asc' ? '↑' : '↓'}</span>}
-                    </button>
-                  </th>
-                ))}
-                <th className="px-4 py-3 text-right text-xs font-medium text-white/40 uppercase tracking-wider">Entry</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-white/40 uppercase tracking-wider">TP1</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-white/40 uppercase tracking-wider">SL</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                Array.from({ length: 4 }).map((_, i) => <SkeletonRow key={i} />)
-              ) : displaySignals.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-white/30">
-                    No signals yet — click Generate Signals
-                  </td>
-                </tr>
-              ) : (
-                displaySignals.map((signal) => (
-                  <tr key={signal.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
-                    <td className="px-4 py-3 font-medium text-white whitespace-nowrap">{signal.asset}</td>
-                    <td className="px-4 py-3">{directionBadge(signal.direction)}</td>
-                    <td className="px-4 py-3"><ConfidenceBar value={signal.confidenceScore / 100} /></td>
-                    <td className="px-4 py-3 text-white/60 text-xs">{signal.regime ?? '—'}</td>
-                    <td className="px-4 py-3 text-right text-white/80 tabular-nums">{fmt(signal.entry_price)}</td>
-                    <td className="px-4 py-3 text-right text-emerald-400/80 tabular-nums">{fmt(signal.tp1)}</td>
-                    <td className="px-4 py-3 text-right text-red-400/80 tabular-nums">{fmt(signal.sl)}</td>
-                    <td className="px-4 py-3 text-white/40 text-xs whitespace-nowrap">
-                      {formatSaoPauloTime(signal.timestamp)}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Explanation Panel for top signal */}
-      {displaySignals[0]?.explanation && displaySignals[0].direction !== 'NO_TRADE' && (
-        <div className="bg-[#111111] border border-white/10 rounded-xl px-4 py-3">
-          <p className="text-xs text-white/40 mb-1 uppercase tracking-wider font-medium">Latest Signal Explanation</p>
-          <p className="text-sm text-white/80 leading-relaxed">{displaySignals[0].explanation}</p>
-        </div>
-      )}
+      </Surface>
     </div>
   )
 }

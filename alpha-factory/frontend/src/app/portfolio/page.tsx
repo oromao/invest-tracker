@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Card, CardTitle, CardValue } from '@/components/ui/card'
+import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { SkeletonCard, SkeletonRow } from '@/components/ui/skeleton'
+import { EmptyState, InlineStat, MetricCard, PageHeader, Surface, StatusPill } from '@/components/product-ui'
+import { SkeletonCard } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { fetchPortfolio } from '@/utils/api'
 
@@ -57,10 +58,6 @@ function formatBRL(n: number): string {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n)
 }
 
-function normalizePercent(value: number): number {
-  return Math.abs(value) <= 1 ? value * 100 : value
-}
-
 export default function PortfolioPage() {
   const [search, setSearch] = useState('')
   const [sideFilter, setSideFilter] = useState<'all' | 'LONG' | 'SHORT'>('all')
@@ -88,6 +85,7 @@ export default function PortfolioPage() {
       timestamp: new Date().toISOString(),
     }
   )
+
   const positions = useMemo(() => {
     const normalized = display.positions.map(normalizePosition)
     const filtered = normalized.filter((pos) => {
@@ -117,6 +115,15 @@ export default function PortfolioPage() {
       }
     })
   }, [display.positions, search, sideFilter, sortKey, sortDir])
+  const sortOptions = [
+    ['asset', 'Asset'],
+    ['side', 'Side'],
+    ['size', 'Size'],
+    ['entry_price', 'Entry'],
+    ['current_price', 'Current'],
+    ['pnl_usd', 'PnL'],
+    ['pnl_pct', 'PnL %'],
+  ] as const
 
   const toggleSort = (key: typeof sortKey) => {
     if (sortKey === key) {
@@ -127,180 +134,114 @@ export default function PortfolioPage() {
     setSortDir(key === 'pnl_usd' ? 'desc' : 'asc')
   }
 
+  const bestPosition = positions[0]
+
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold text-white">Portfolio</h1>
-        <p className="text-sm text-white/50 mt-0.5">Live position monitor</p>
-      </div>
+      <PageHeader
+        eyebrow="Portfolio"
+        title="Position monitor"
+        subtitle="A compact view of exposure, PnL, and live position detail. Heavy numeric tables are reduced to readable cards on mobile."
+        status={<StatusPill tone={display.open_pnl >= 0 ? 'success' : 'danger'}>{display.open_pnl >= 0 ? 'Positive PnL' : 'Down on the day'}</StatusPill>}
+      />
 
       {isError && (
-        <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
-          Failed to fetch portfolio from API — showing empty state.
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          Failed to fetch portfolio from API — showing the current empty or partial state.
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search asset or signal"
-          className="md:col-span-2 bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        />
-        <select
-          value={sideFilter}
-          onChange={(e) => setSideFilter(e.target.value as typeof sideFilter)}
-          className="bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          <option value="all">All sides</option>
-          <option value="LONG">LONG</option>
-          <option value="SHORT">SHORT</option>
-        </select>
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <MetricCard label="Total Value" value={formatBRL(display.total_value)} />
+        <MetricCard label="Open PnL" value={`${display.open_pnl >= 0 ? '+' : ''}${formatBRL(display.open_pnl)}`} tone={display.open_pnl >= 0 ? 'success' : 'danger'} />
+        <MetricCard label="Daily PnL" value={`${display.daily_pnl >= 0 ? '+' : ''}${formatBRL(display.daily_pnl)}`} tone={display.daily_pnl >= 0 ? 'success' : 'danger'} />
+        <MetricCard label="Active Positions" value={display.active_positions} tone="info" />
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
+      <Surface title="Filters" description="Search by asset or linked signal.">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search asset or signal…"
+            className="rounded-xl border border-white/10 bg-[#0f0f0f] px-3 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-blue-500 md:col-span-2"
+          />
+          <select
+            value={sideFilter}
+            onChange={(e) => setSideFilter(e.target.value as typeof sideFilter)}
+            className="rounded-xl border border-white/10 bg-[#0f0f0f] px-3 py-3 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="all">All sides</option>
+            <option value="LONG">LONG</option>
+            <option value="SHORT">SHORT</option>
+          </select>
+        </div>
+      </Surface>
+
+      <Surface title="Open positions" description="A clean card stack on mobile, sortable controls for power users.">
+        <div className="mb-4 flex flex-wrap gap-2 text-[11px] text-white/35">
+          {sortOptions.map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => toggleSort(key)}
+              className="rounded-full border border-white/10 px-3 py-2 uppercase tracking-[0.18em] transition-colors hover:border-white/20 hover:text-white"
+            >
+              {label}
+              {sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+            </button>
+          ))}
+        </div>
+
         {isLoading ? (
-          Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
-        ) : (
-          <>
-            <Card>
-              <CardTitle>Total Value</CardTitle>
-              <CardValue className="text-base font-bold text-white">
-                {formatBRL(display.total_value)}
-              </CardValue>
-            </Card>
-            <Card>
-              <CardTitle>Open PnL</CardTitle>
-              <CardValue
-                className={cn(
-                  'text-base font-bold',
-                  display.open_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'
-                )}
-              >
-                {display.open_pnl >= 0 ? '+' : ''}
-                {formatBRL(display.open_pnl)}
-              </CardValue>
-            </Card>
-            <Card>
-              <CardTitle>Daily PnL</CardTitle>
-              <CardValue
-                className={cn(
-                  'text-base font-bold',
-                  display.daily_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'
-                )}
-              >
-                {display.daily_pnl >= 0 ? '+' : ''}
-                {formatBRL(display.daily_pnl)}
-              </CardValue>
-            </Card>
-            <Card>
-              <CardTitle>Active Positions</CardTitle>
-              <CardValue>{display.active_positions}</CardValue>
-            </Card>
-          </>
-        )}
-      </div>
-
-      {/* Positions Table */}
-      <div className="bg-[#111111] border border-white/10 rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-white/8">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-white">Open Positions</h2>
-            <div className="flex flex-wrap items-center gap-1 text-[11px] text-white/35">
-              {([
-                ['asset', 'Asset'],
-                ['side', 'Side'],
-                ['size', 'Size'],
-                ['entry_price', 'Entry'],
-                ['current_price', 'Current'],
-                ['pnl_usd', 'PnL'],
-                ['pnl_pct', 'PnL %'],
-              ] as const).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => toggleSort(key)}
-                  className="rounded-md border border-white/10 px-2 py-1 hover:text-white hover:border-white/20 transition-colors"
-                >
-                  {label}
-                  {sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
-                </button>
-              ))}
-            </div>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <SkeletonCard key={i} />
+            ))}
           </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-white/[0.02]">
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">Asset</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">Side</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-white/40 uppercase tracking-wider">Size</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-white/40 uppercase tracking-wider">Entry</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-white/40 uppercase tracking-wider">Current</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-white/40 uppercase tracking-wider">PnL (R$)</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-white/40 uppercase tracking-wider">PnL (%)</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">Signal</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} />)
-              ) : positions.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="px-4 py-16 text-center">
-                    <div className="flex flex-col items-center gap-3 text-white/30">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-10 h-10 text-white/15">
-                        <rect x="2" y="7" width="20" height="14" rx="2" />
-                        <path strokeLinecap="round" d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2" />
-                        <path strokeLinecap="round" d="M12 12v4M10 14h4" />
-                      </svg>
-                      <div>
-                        <p className="font-medium text-white/40">No open positions</p>
-                        <p className="text-xs mt-0.5">Positions will appear here when signals are executed</p>
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                positions.map((pos, idx) => {
-                  const isPnlPositive = pos.pnl_usd >= 0
-                  return (
-                    <tr key={pos.id ?? idx} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
-                      <td className="px-4 py-3 font-medium text-white">{pos.asset}</td>
-                      <td className="px-4 py-3">
-                        {pos.side === 'LONG' ? (
-                          <Badge variant="success">LONG</Badge>
-                        ) : (
-                          <Badge variant="danger">SHORT</Badge>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right text-white/70 tabular-nums">{pos.size}</td>
-                      <td className="px-4 py-3 text-right text-white/60 tabular-nums">
-                        {pos.entry_price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className="px-4 py-3 text-right text-white tabular-nums">
-                        {pos.current_price!.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className={cn('px-4 py-3 text-right tabular-nums font-medium', isPnlPositive ? 'text-emerald-400' : 'text-red-400')}>
-                        {isPnlPositive ? '+' : ''}{formatBRL(pos.pnl_usd)}
-                      </td>
-                      <td className={cn('px-4 py-3 text-right tabular-nums font-medium', isPnlPositive ? 'text-emerald-400' : 'text-red-400')}>
-                        {isPnlPositive ? '+' : ''}{normalizePercent(pos.pnl_pct).toFixed(2)}%
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-white/30">
-                        {pos.last_signal_id ?? '—'}
-                      </td>
-                    </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+        ) : positions.length === 0 ? (
+          <EmptyState title="No open positions" description="The portfolio is currently flat." />
+        ) : (
+          <div className="grid gap-3 lg:grid-cols-2">
+            {positions.map((pos) => (
+              <Card key={pos.asset} className="bg-white/[0.02]">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.2em] text-white/35">{pos.asset}</div>
+                    <div className="mt-1 text-base font-medium text-white">{pos.side}</div>
+                  </div>
+                  <Badge variant={pos.side === 'LONG' ? 'success' : 'danger'}>{pos.side}</Badge>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+                  <InlineStat label="Size" value={pos.size.toLocaleString('pt-BR')} />
+                  <InlineStat label="Entry" value={pos.entry_price.toLocaleString('pt-BR')} />
+                  <InlineStat label="Current" value={pos.current_price?.toLocaleString('pt-BR') ?? '—'} />
+                  <InlineStat label="PnL %" value={`${pos.pnl_pct.toFixed(2)}%`} tone={pos.pnl_pct >= 0 ? 'success' : 'danger'} />
+                </div>
+                <div className="mt-4 rounded-xl border border-white/8 bg-white/[0.02] p-3 text-sm text-white/55">
+                  PnL: {pos.pnl_usd >= 0 ? '+' : ''}{formatBRL(pos.pnl_usd)}
+                </div>
+                <div className="mt-4 text-xs text-white/40">
+                  Last signal: {pos.last_signal_id ?? 'n/a'}
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </Surface>
+
+      <Surface title="Largest current exposure" description="The highest-impact position currently open.">
+        {bestPosition ? (
+          <div className="grid gap-3 md:grid-cols-4">
+            <InlineStat label="Asset" value={bestPosition.asset} />
+            <InlineStat label="Side" value={bestPosition.side} tone={bestPosition.side === 'LONG' ? 'success' : 'danger'} />
+            <InlineStat label="PnL" value={`${bestPosition.pnl_usd >= 0 ? '+' : ''}${formatBRL(bestPosition.pnl_usd)}`} tone={bestPosition.pnl_usd >= 0 ? 'success' : 'danger'} />
+            <InlineStat label="Signal" value={bestPosition.last_signal_id ?? 'n/a'} />
+          </div>
+        ) : (
+          <EmptyState title="No exposure right now" description="The portfolio is flat, so there is no dominant position to highlight." />
+        )}
+      </Surface>
     </div>
   )
 }

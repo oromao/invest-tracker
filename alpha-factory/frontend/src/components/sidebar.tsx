@@ -7,6 +7,16 @@ import { cn } from '@/lib/utils'
 
 const navItems = [
   {
+    href: '/',
+    label: 'Dashboard',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+        <path d="M4 10.5A6.5 6.5 0 0 1 10.5 4H20v10.5A6.5 6.5 0 0 1 13.5 21H4z" />
+        <path d="M8 15h8M8 11h5" />
+      </svg>
+    ),
+  },
+  {
     href: '/signals',
     label: 'Signals',
     icon: (
@@ -130,17 +140,19 @@ export function Sidebar() {
         {/* Nav */}
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
           {navItems.map((item) => {
-            const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+            const isActive =
+              (item.href === '/' && pathname === '/') ||
+              (item.href !== '/' && (pathname === item.href || pathname.startsWith(item.href + '/')))
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 onClick={() => setIsOpen(false)}
                 className={cn(
-                  'flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all',
+                  'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors',
                   isActive
-                    ? 'bg-blue-500/15 text-blue-400 font-medium'
-                    : 'text-white/50 hover:text-white/80 hover:bg-white/5'
+                    ? 'bg-blue-500/15 text-blue-300 font-medium ring-1 ring-blue-500/20'
+                    : 'text-white/52 hover:text-white/80 hover:bg-white/5'
                 )}
               >
                 <span className={cn(isActive ? 'text-blue-400' : 'text-white/40')}>
@@ -154,7 +166,7 @@ export function Sidebar() {
 
         {/* Footer */}
         <div className="px-5 py-4 border-t border-white/8">
-          <p className="text-[11px] text-white/30">Alpha Factory v0.1</p>
+          <p className="text-[11px] text-white/30">Alpha Factory · Autonomous Trading UI</p>
         </div>
       </aside>
     </>
