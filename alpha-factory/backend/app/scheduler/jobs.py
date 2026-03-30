@@ -47,6 +47,7 @@ _JOB_TIMEOUTS = {
     "audit_job": 180,
     "drift_job": 120,
     "paper_ingest_job": 60,
+    "paper_allocation_job": 120,
     "paper_update_job": 60,
     "paper_decay_job": 60,
 }
@@ -63,6 +64,7 @@ JOB_INTERVAL_MINUTES = {
     "audit_job": 60,
     "drift_job": 120,
     "paper_ingest_job": 15,
+    "paper_allocation_job": 15,
     "paper_update_job": 5,
     "paper_decay_job": 120,
     "watchdog_job": 10,
@@ -231,6 +233,13 @@ async def _paper_ingest_coro() -> None:
     logger.info("Paper trader ingested %d new signals", n)
 
 
+async def _paper_allocation_coro() -> None:
+    from app.execution.paper_allocator import PaperPortfolioAllocator
+    allocator = PaperPortfolioAllocator()
+    allocations = await allocator.refresh_allocations()
+    logger.info("Paper allocation refreshed for %d strategies", len(allocations))
+
+
 async def _paper_update_coro() -> None:
     from app.execution.paper_trader import PaperTrader
     trader = PaperTrader()
@@ -269,6 +278,7 @@ async def _watchdog_coro() -> None:
             "audit_job",
             "drift_job",
             "paper_ingest_job",
+            "paper_allocation_job",
             "paper_update_job",
             "paper_decay_job",
         ):
@@ -321,6 +331,8 @@ async def _watchdog_coro() -> None:
         await _run_drift_job()
     if "paper_ingest_job" in stale:
         await _run_paper_ingest_job()
+    if "paper_allocation_job" in stale:
+        await _run_paper_allocation_job()
     if "research_job" in stale:
         await _run_research_job()
     if "paper_update_job" in stale:
@@ -371,6 +383,10 @@ async def _run_drift_job() -> None:
 
 async def _run_paper_ingest_job() -> None:
     await _run_with_instrumentation("paper_ingest_job", _paper_ingest_coro())
+
+
+async def _run_paper_allocation_job() -> None:
+    await _run_with_instrumentation("paper_allocation_job", _paper_allocation_coro())
 
 
 async def _run_paper_update_job() -> None:
@@ -491,6 +507,15 @@ class AlphaScheduler:
             coalesce=True,
         )
         self.scheduler.add_job(
+            _run_paper_allocation_job,
+            trigger=IntervalTrigger(minutes=15),
+            id="paper_allocation_job",
+            name="Paper Allocation Refresh",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        self.scheduler.add_job(
             _run_paper_update_job,
             trigger=IntervalTrigger(minutes=5),
             id="paper_update_job",
@@ -556,6 +581,7 @@ class AlphaScheduler:
         await _run_paper_ingest_job()
         await _run_paper_update_job()
         await _run_paper_decay_job()
+        await _run_paper_allocation_job()
         await _run_audit_job()
         await _run_drift_job()
         await _run_watchdog_job()

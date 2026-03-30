@@ -96,6 +96,36 @@ class PortfolioPosition(BaseModel):
     last_signal_id: Optional[str] = None
 
 
+class PaperStrategyAllocationResponse(BaseModel):
+    id: Optional[int] = None
+    strategy_id: str
+    asset: str
+    timeframe: str
+    lifecycle_state: Optional[str] = None
+    regime: Optional[str] = None
+    allocation_weight: float
+    capital_allocated: float
+    realized_pnl: float
+    unrealized_pnl: float
+    net_pnl: float
+    trade_count: int
+    win_rate: Optional[float] = None
+    payoff_ratio: Optional[float] = None
+    max_drawdown: Optional[float] = None
+    recent_pnl: Optional[float] = None
+    recent_win_rate: Optional[float] = None
+    recent_trade_count: Optional[int] = None
+    backtest_win_rate: Optional[float] = None
+    backtest_profit_factor: Optional[float] = None
+    backtest_sharpe: Optional[float] = None
+    backtest_max_drawdown: Optional[float] = None
+    regime_fit_score: Optional[float] = None
+    concentration_penalty: Optional[float] = None
+    paper_backtest_delta: Optional[float] = None
+    reason: Optional[str] = None
+    updated_at: datetime
+
+
 class PortfolioResponse(BaseModel):
     total_value: float
     cash: float
@@ -107,6 +137,7 @@ class PortfolioResponse(BaseModel):
     total_pnl_pct: float
     active_positions: Optional[int] = None
     positions: List[PortfolioPosition]
+    strategy_allocations: List[PaperStrategyAllocationResponse] = []
     timestamp: datetime
 
 

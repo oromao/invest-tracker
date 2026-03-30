@@ -100,7 +100,31 @@ interface PortfolioSummary {
   total_pnl_pct?: number
   active_positions?: number
   positions: PortfolioPosition[]
+  strategy_allocations?: StrategyAllocation[]
   timestamp?: string
+}
+
+interface StrategyAllocation {
+  strategy_id: string
+  asset: string
+  timeframe: string
+  lifecycle_state?: string | null
+  allocation_weight: number
+  capital_allocated: number
+  realized_pnl: number
+  unrealized_pnl: number
+  net_pnl: number
+  trade_count: number
+  win_rate?: number | null
+  payoff_ratio?: number | null
+  max_drawdown?: number | null
+  recent_pnl?: number | null
+  recent_win_rate?: number | null
+  backtest_profit_factor?: number | null
+  regime_fit_score?: number | null
+  paper_backtest_delta?: number | null
+  reason?: string | null
+  updated_at?: string
 }
 
 interface HealthResponse {
@@ -238,6 +262,7 @@ export default function Home() {
   }
 
   const positions = portfolio?.positions ?? []
+  const strategyAllocations = [...(portfolio?.strategy_allocations ?? [])].sort((a, b) => (b.allocation_weight ?? 0) - (a.allocation_weight ?? 0))
   const longCount = positions.filter((position) => (position.side ?? position.direction) === 'LONG').length
   const shortCount = positions.filter((position) => (position.side ?? position.direction) === 'SHORT').length
   const openNotional = positions.reduce((sum, position) => sum + position.entry_price * position.size, 0)
@@ -245,6 +270,10 @@ export default function Home() {
     if (!acc) return position
     return position.entry_price * position.size > acc.entry_price * acc.size ? position : acc
   }, null)
+  const allocationCoverage = strategyAllocations.reduce((sum, row) => sum + (row.allocation_weight ?? 0), 0)
+  const allocationCash = Math.max(0, 1 - allocationCoverage)
+  const topAllocation = strategyAllocations[0]
+  const weakestAllocation = [...strategyAllocations].sort((a, b) => (a.net_pnl ?? 0) - (b.net_pnl ?? 0))[0]
 
   const freshnessSources = [
     latestSignal?.timestamp,
@@ -637,6 +666,64 @@ export default function Home() {
           <div className="mt-4 text-xs text-white/40">
             Latest portfolio update: {portfolio?.timestamp ? formatMaybeTimestamp(portfolio.timestamp) : 'n/a'}
           </div>
+        </Surface>
+
+        <Surface
+          title="Paper allocation"
+          description="Capital assignment across strategies. Stronger paper behavior receives more weight; weak or unstable strategies are capped."
+          action={<StatusPill tone={allocationCash > 0.2 ? 'warning' : 'success'}>{`${Math.round(allocationCoverage * 100)}% deployed · ${Math.round(allocationCash * 100)}% cash`}</StatusPill>}
+        >
+          <div className="grid gap-3 md:grid-cols-4">
+            <MetricCard label="Covered allocation" value={`${Math.round(allocationCoverage * 100)}%`} tone="info" />
+            <MetricCard label="Cash reserve" value={`${Math.round(allocationCash * 100)}%`} tone={allocationCash > 0.2 ? 'warning' : 'success'} />
+            <MetricCard label="Top allocation" value={topAllocation?.strategy_id ?? 'n/a'} tone="success" />
+            <MetricCard label="Weakest recent" value={weakestAllocation?.strategy_id ?? 'n/a'} tone="danger" />
+          </div>
+
+          {strategyAllocations.length === 0 ? (
+            <div className="mt-4">
+              <EmptyState title="No allocation snapshots yet" description="Wait for the paper allocator job to persist a strategy-level allocation snapshot." />
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+              {strategyAllocations.slice(0, 4).map((allocation) => (
+                <Card key={`${allocation.strategy_id}-${allocation.asset}-${allocation.timeframe}`} className="bg-white/[0.02]">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-[11px] uppercase tracking-[0.2em] text-white/35">
+                        {allocation.asset} · {allocation.timeframe}
+                      </div>
+                      <div className="mt-1 break-all text-base font-semibold text-white">{allocation.strategy_id}</div>
+                    </div>
+                    <Badge variant={allocation.lifecycle_state === 'retired' || allocation.lifecycle_state === 'degraded' ? 'danger' : allocation.allocation_weight >= 0.15 ? 'success' : 'warning'}>
+                      {allocation.lifecycle_state ?? 'paper'}
+                    </Badge>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+                    <InlineStat label="Weight" value={`${(allocation.allocation_weight * 100).toFixed(1)}%`} tone="info" />
+                    <InlineStat label="Capital" value={fmtBRL(allocation.capital_allocated)} />
+                    <InlineStat label="Net PnL" value={`${allocation.net_pnl >= 0 ? '+' : ''}${fmtBRL(allocation.net_pnl)}`} tone={allocation.net_pnl >= 0 ? 'success' : 'danger'} />
+                    <InlineStat label="Drawdown" value={`${(allocation.max_drawdown ?? 0).toFixed(2)}%`} tone="warning" />
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+                    <InlineStat label="Trades" value={allocation.trade_count} />
+                    <InlineStat label="Win rate" value={allocation.win_rate != null ? `${(allocation.win_rate * 100).toFixed(1)}%` : '—'} tone={allocation.win_rate != null && allocation.win_rate >= 0.5 ? 'success' : 'warning'} />
+                    <InlineStat label="PF" value={allocation.backtest_profit_factor != null ? allocation.backtest_profit_factor.toFixed(2) : '—'} />
+                    <InlineStat label="Recent PnL" value={`${(allocation.recent_pnl ?? 0) >= 0 ? '+' : ''}${fmtBRL(allocation.recent_pnl ?? 0)}`} tone={(allocation.recent_pnl ?? 0) >= 0 ? 'success' : 'danger'} />
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+                    <InlineStat label="Regime fit" value={allocation.regime_fit_score != null ? `${(allocation.regime_fit_score * 100).toFixed(0)}%` : '—'} tone="info" />
+                    <InlineStat label="Recent WR" value={allocation.recent_win_rate != null ? `${(allocation.recent_win_rate * 100).toFixed(1)}%` : '—'} />
+                    <InlineStat label="Paper-vs-BT" value={allocation.paper_backtest_delta != null ? fmtSigned(allocation.paper_backtest_delta, 3) : '—'} tone={allocation.paper_backtest_delta != null && allocation.paper_backtest_delta >= 0 ? 'success' : 'warning'} />
+                    <InlineStat label="Updated" value={formatMaybeTimestamp(allocation.updated_at)} />
+                  </div>
+                  <div className="mt-4 rounded-xl border border-white/8 bg-white/[0.02] p-3 text-xs leading-6 text-white/50">
+                    {allocation.reason || 'Allocation derived from live paper performance and backtest expectations.'}
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
         </Surface>
       </div>
     </div>

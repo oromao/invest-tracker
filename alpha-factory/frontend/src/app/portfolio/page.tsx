@@ -35,6 +35,37 @@ interface PortfolioSummary {
   daily_pnl_pct?: number
   timestamp?: string
   positions: Position[]
+  strategy_allocations?: StrategyAllocation[]
+}
+
+interface StrategyAllocation {
+  id?: number
+  strategy_id: string
+  asset: string
+  timeframe: string
+  lifecycle_state?: string | null
+  regime?: string | null
+  allocation_weight: number
+  capital_allocated: number
+  realized_pnl: number
+  unrealized_pnl: number
+  net_pnl: number
+  trade_count: number
+  win_rate?: number | null
+  payoff_ratio?: number | null
+  max_drawdown?: number | null
+  recent_pnl?: number | null
+  recent_win_rate?: number | null
+  recent_trade_count?: number | null
+  backtest_win_rate?: number | null
+  backtest_profit_factor?: number | null
+  backtest_sharpe?: number | null
+  backtest_max_drawdown?: number | null
+  regime_fit_score?: number | null
+  concentration_penalty?: number | null
+  paper_backtest_delta?: number | null
+  reason?: string | null
+  updated_at?: string
 }
 
 function normalizePosition(p: Position): Position & { pnl_usd: number; side: 'LONG' | 'SHORT' } {
@@ -46,16 +77,28 @@ function normalizePosition(p: Position): Position & { pnl_usd: number; side: 'LO
   }
 }
 
-function normalizePortfolio(p: PortfolioSummary): PortfolioSummary & { open_pnl: number; active_positions: number } {
+function normalizePortfolio(p: PortfolioSummary): PortfolioSummary & { open_pnl: number; active_positions: number; strategy_allocations: StrategyAllocation[] } {
   return {
     ...p,
     open_pnl: p.open_pnl ?? p.total_pnl ?? 0,
     active_positions: p.active_positions ?? p.positions.length,
+    strategy_allocations: p.strategy_allocations ?? [],
   }
 }
 
 function formatBRL(n: number): string {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n)
+}
+
+function formatMaybeTimestamp(value?: string | null): string {
+  if (!value) return 'n/a'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return 'n/a'
+  return new Intl.DateTimeFormat('pt-BR', {
+    dateStyle: 'short',
+    timeStyle: 'medium',
+    timeZone: 'America/Sao_Paulo',
+  }).format(parsed)
 }
 
 export default function PortfolioPage() {
@@ -82,6 +125,7 @@ export default function PortfolioPage() {
       total_pnl_pct: 0,
       active_positions: 0,
       positions: [],
+      strategy_allocations: [],
       timestamp: new Date().toISOString(),
     }
   )
@@ -121,6 +165,13 @@ export default function PortfolioPage() {
     if (!acc) return position
     return position.entry_price * position.size > acc.entry_price * acc.size ? position : acc
   }, null)
+  const strategyAllocations = useMemo(() => {
+    return [...(display.strategy_allocations ?? [])].sort((a, b) => (b.allocation_weight ?? 0) - (a.allocation_weight ?? 0))
+  }, [display.strategy_allocations])
+  const allocationTotal = strategyAllocations.reduce((sum, row) => sum + (row.allocation_weight ?? 0), 0)
+  const cashReserve = Math.max(0, 1 - allocationTotal)
+  const topAllocation = strategyAllocations[0]
+  const weakestAllocation = [...strategyAllocations].sort((a, b) => (a.net_pnl ?? 0) - (b.net_pnl ?? 0))[0]
   const sortOptions = [
     ['asset', 'Asset'],
     ['side', 'Side'],
@@ -171,6 +222,64 @@ export default function PortfolioPage() {
           <InlineStat label="Open Notional" value={formatBRL(positions.reduce((sum, position) => sum + position.entry_price * position.size, 0))} />
           <InlineStat label="Largest Asset" value={largestPosition?.asset ?? 'n/a'} tone={largestPosition ? 'warning' : 'default'} />
         </div>
+      </Surface>
+
+      <Surface
+        title="Paper allocation"
+        description="Autonomous capital assignment driven by live paper PnL, drawdown, backtest expectations, lifecycle state, and regime fit."
+        action={<Badge variant={cashReserve > 0.2 ? 'warning' : 'success'}>{`${Math.round(allocationTotal * 100)}% deployed · ${Math.round(cashReserve * 100)}% cash`}</Badge>}
+      >
+        <div className="grid gap-3 md:grid-cols-4">
+          <MetricCard label="Covered allocation" value={`${Math.round(allocationTotal * 100)}%`} tone="info" />
+          <MetricCard label="Cash reserve" value={`${Math.round(cashReserve * 100)}%`} tone={cashReserve > 0.2 ? 'warning' : 'success'} />
+          <MetricCard label="Top allocation" value={topAllocation?.strategy_id ?? 'n/a'} tone="success" />
+          <MetricCard label="Weakest recent" value={weakestAllocation?.strategy_id ?? 'n/a'} tone="danger" />
+        </div>
+
+        {strategyAllocations.length === 0 ? (
+          <div className="mt-4">
+            <EmptyState title="No allocation snapshots yet" description="Run the paper allocator or wait for the scheduler to refresh the portfolio state." />
+          </div>
+        ) : (
+          <>
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+              {strategyAllocations.slice(0, 6).map((allocation) => (
+                <Card key={`${allocation.strategy_id}-${allocation.asset}-${allocation.timeframe}`} className="bg-white/[0.02]">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-[11px] uppercase tracking-[0.2em] text-white/35">{allocation.asset} · {allocation.timeframe}</div>
+                      <div className="mt-1 break-all text-base font-semibold text-white">{allocation.strategy_id}</div>
+                    </div>
+                    <Badge variant={allocation.lifecycle_state === 'retired' || allocation.lifecycle_state === 'degraded' ? 'danger' : allocation.allocation_weight >= 0.15 ? 'success' : 'warning'}>
+                      {allocation.lifecycle_state ?? 'paper'}
+                    </Badge>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+                    <InlineStat label="Weight" value={`${(allocation.allocation_weight * 100).toFixed(1)}%`} tone="info" />
+                    <InlineStat label="Capital" value={formatBRL(allocation.capital_allocated)} />
+                    <InlineStat label="Net PnL" value={`${allocation.net_pnl >= 0 ? '+' : ''}${formatBRL(allocation.net_pnl)}`} tone={allocation.net_pnl >= 0 ? 'success' : 'danger'} />
+                    <InlineStat label="Drawdown" value={`${(allocation.max_drawdown ?? 0) >= 0 ? (allocation.max_drawdown ?? 0).toFixed(2) : '0.00'}%`} tone="warning" />
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+                    <InlineStat label="Trades" value={allocation.trade_count} />
+                    <InlineStat label="Win rate" value={allocation.win_rate != null ? `${(allocation.win_rate * 100).toFixed(1)}%` : '—'} tone={allocation.win_rate != null && allocation.win_rate >= 0.5 ? 'success' : 'warning'} />
+                    <InlineStat label="Payoff" value={allocation.payoff_ratio != null ? allocation.payoff_ratio.toFixed(2) : '—'} />
+                    <InlineStat label="Recent PnL" value={`${(allocation.recent_pnl ?? 0) >= 0 ? '+' : ''}${formatBRL(allocation.recent_pnl ?? 0)}`} tone={(allocation.recent_pnl ?? 0) >= 0 ? 'success' : 'danger'} />
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+                    <InlineStat label="Paper vs backtest" value={allocation.paper_backtest_delta != null ? `${(allocation.paper_backtest_delta * 100).toFixed(1)} bp` : '—'} tone={allocation.paper_backtest_delta != null && allocation.paper_backtest_delta >= 0 ? 'success' : 'warning'} />
+                    <InlineStat label="Regime fit" value={allocation.regime_fit_score != null ? `${(allocation.regime_fit_score * 100).toFixed(0)}%` : '—'} tone="info" />
+                    <InlineStat label="Recent win rate" value={allocation.recent_win_rate != null ? `${(allocation.recent_win_rate * 100).toFixed(1)}%` : '—'} />
+                    <InlineStat label="Updated" value={allocation.updated_at ? formatMaybeTimestamp(allocation.updated_at) : 'n/a'} />
+                  </div>
+                  <div className="mt-4 rounded-xl border border-white/8 bg-white/[0.02] p-3 text-xs text-white/50">
+                    {allocation.reason || 'Allocation derived from live paper performance and recent backtest evidence.'}
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </>
+        )}
       </Surface>
 
       <Surface title="Filters" description="Search by asset or linked signal.">

@@ -12,8 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import PortfolioPosition, PortfolioResponse
 from app.config import settings
-from app.db.models import OHLCVBar, Position, Signal, Trade
+from app.db.models import OHLCVBar, PaperStrategyAllocation, Position, Signal, Trade
 from app.db.session import get_db
+from app.execution.paper_allocator import PaperPortfolioAllocator
+from app.api.schemas import PaperStrategyAllocationResponse
 from app.shared.time import now_sao_paulo, to_sao_paulo
 
 logger = logging.getLogger(__name__)
@@ -98,8 +100,60 @@ async def _build_paper_response() -> PortfolioResponse:
         total_pnl_pct=total_pnl_pct,
         active_positions=len(positions),
         positions=positions,
+        strategy_allocations=[],
         timestamp=now_sao_paulo(),
     )
+
+
+async def _load_strategy_allocations(db: AsyncSession) -> List[PaperStrategyAllocationResponse]:
+    allocator = PaperPortfolioAllocator()
+    current = await allocator.current_allocations()
+    if current:
+        return [PaperStrategyAllocationResponse(**row) for row in current]
+
+    stmt = (
+        select(PaperStrategyAllocation)
+        .order_by(desc(PaperStrategyAllocation.updated_at), desc(PaperStrategyAllocation.id))
+    )
+    result = await db.execute(stmt)
+    rows = result.scalars().all()
+    latest: dict[tuple[str, str, str], PaperStrategyAllocation] = {}
+    for row in rows:
+        key = (row.strategy_id, row.asset, row.timeframe)
+        if key not in latest:
+            latest[key] = row
+    return [
+        PaperStrategyAllocationResponse(
+            id=row.id,
+            strategy_id=row.strategy_id,
+            asset=row.asset,
+            timeframe=row.timeframe,
+            lifecycle_state=row.lifecycle_state,
+            regime=row.regime,
+            allocation_weight=row.allocation_weight,
+            capital_allocated=row.capital_allocated,
+            realized_pnl=row.realized_pnl,
+            unrealized_pnl=row.unrealized_pnl,
+            net_pnl=row.net_pnl,
+            trade_count=row.trade_count,
+            win_rate=row.win_rate,
+            payoff_ratio=row.payoff_ratio,
+            max_drawdown=row.max_drawdown,
+            recent_pnl=row.recent_pnl,
+            recent_win_rate=row.recent_win_rate,
+            recent_trade_count=row.recent_trade_count,
+            backtest_win_rate=row.backtest_win_rate,
+            backtest_profit_factor=row.backtest_profit_factor,
+            backtest_sharpe=row.backtest_sharpe,
+            backtest_max_drawdown=row.backtest_max_drawdown,
+            regime_fit_score=row.regime_fit_score,
+            concentration_penalty=row.concentration_penalty,
+            paper_backtest_delta=row.paper_backtest_delta,
+            reason=row.reason,
+            updated_at=to_sao_paulo(row.updated_at),
+        )
+        for row in latest.values()
+    ]
 
 
 async def _build_db_response(db: AsyncSession) -> PortfolioResponse:
@@ -186,6 +240,7 @@ async def _build_db_response(db: AsyncSession) -> PortfolioResponse:
         total_pnl_pct=(open_pnl / invested * 100.0) if invested > 0 else 0.0,
         active_positions=len(open_positions),
         positions=open_positions,
+        strategy_allocations=[],
         timestamp=now,
     )
 
@@ -208,8 +263,12 @@ async def get_portfolio(db: AsyncSession = Depends(get_db)):
         except Exception as exc:
             logger.warning("Failed to fetch portfolio from invest-tracker API: %s", exc)
 
+    strategy_allocations = await _load_strategy_allocations(db)
     db_response = await _build_db_response(db)
     if db_response.active_positions and db_response.positions:
+        db_response.strategy_allocations = strategy_allocations
         return db_response
 
-    return await _build_paper_response()
+    paper_response = await _build_paper_response()
+    paper_response.strategy_allocations = strategy_allocations
+    return paper_response

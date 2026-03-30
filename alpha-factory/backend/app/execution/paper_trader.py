@@ -11,18 +11,20 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from typing import Dict, List, Optional
 
 import numpy as np
 import redis.asyncio as aioredis
-from sqlalchemy import select, text
+from sqlalchemy import and_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.db.models import DirectionEnum, OHLCVBar, StrategyStatusEnum
+from app.db.models import DirectionEnum, OHLCVBar, StrategyStatusEnum, Trade
 from app.db.session import AsyncSessionLocal
+from app.execution.paper_allocator import PaperPortfolioAllocator
 from app.research.memory import StrategyMemoryStore
-from app.shared.time import now_sao_paulo
+from app.shared.time import ensure_timezone, now_sao_paulo
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,7 @@ def _redis():
 class PaperTrader:
     def __init__(self) -> None:
         self.memory = StrategyMemoryStore()
+        self.allocator = PaperPortfolioAllocator()
 
     # ── Redis helpers ──────────────────────────────────────────────────────
     async def _load_positions(self, r) -> List[Dict]:
@@ -77,6 +80,71 @@ class PaperTrader:
 
     async def _save_stats(self, r, stats: Dict) -> None:
         await r.set(_KEY_STATS, json.dumps(stats))
+
+    async def _persist_closed_trade_history(self, positions: List[Dict]) -> int:
+        """
+        Backfill closed paper positions into the persistent trades table.
+        This is idempotent and only mirrors already-real paper-trading outcomes.
+        """
+        closed_positions = [
+            pos for pos in positions
+            if pos.get("status") == "closed" and pos.get("close_ts") and pos.get("exit_price") is not None
+        ]
+        if not closed_positions:
+            return 0
+
+        persisted = 0
+        async with AsyncSessionLocal() as session:
+            for pos in closed_positions:
+                strategy_id = str(pos.get("strategy_id")) if pos.get("strategy_id") is not None else None
+                entry_time = pos.get("open_ts")
+                exit_time = pos.get("close_ts")
+                if not entry_time or not exit_time:
+                    continue
+                try:
+                    entry_time_dt = ensure_timezone(datetime.fromisoformat(str(entry_time)))
+                except Exception:
+                    entry_time_dt = now_sao_paulo()
+                try:
+                    exit_time_dt = ensure_timezone(datetime.fromisoformat(str(exit_time)))
+                except Exception:
+                    exit_time_dt = now_sao_paulo()
+
+                existing = await session.execute(
+                    select(Trade.id).where(
+                        and_(
+                            Trade.asset == pos["asset"],
+                            Trade.strategy_id == strategy_id,
+                            Trade.entry_time == entry_time_dt,
+                            Trade.exit_time == exit_time_dt,
+                            Trade.size == pos.get("size"),
+                            Trade.pnl == pos.get("pnl"),
+                        )
+                    ).limit(1)
+                )
+                if existing.scalar_one_or_none() is not None:
+                    continue
+
+                session.add(
+                    Trade(
+                        asset=pos["asset"],
+                        side=DirectionEnum(pos["direction"]),
+                        entry_price=float(pos["entry_price"]),
+                        exit_price=float(pos["exit_price"]),
+                        size=float(pos["size"]),
+                        pnl=float(pos["pnl"]),
+                        entry_time=entry_time_dt,
+                        exit_time=exit_time_dt,
+                        timeframe=pos.get("timeframe"),
+                        strategy_id=strategy_id,
+                    )
+                )
+                persisted += 1
+            if persisted:
+                await session.commit()
+        if persisted:
+            logger.info("Backfilled %d closed paper trades into persistent storage", persisted)
+        return persisted
 
     # ── Portfolio state for signal engine ────────────────────────────────
     async def _write_portfolio_state(
@@ -128,6 +196,7 @@ class PaperTrader:
         if not rows:
             return 0
 
+        await self.allocator.portfolio_view()
         r = _redis()
         positions = await self._load_positions(r)
         stats = await self._load_stats(r)
@@ -142,7 +211,10 @@ class PaperTrader:
             dir_int = 1 if direction == "LONG" else -1
             # Apply entry slippage
             actual_entry = float(entry_price) * (1 + dir_int * settings.backtest_slippage_pct)
-            trade_size = stats["capital"] * _POSITION_SIZE_PCT
+            allocation_weight = await self.allocator.allocation_for_strategy(strat_id, asset, timeframe)
+            if allocation_weight <= 0.0:
+                continue
+            trade_size = max(stats["capital"] * allocation_weight, stats["capital"] * 0.02)
 
             positions.append(
                 {
@@ -155,6 +227,7 @@ class PaperTrader:
                     "sl_price": float(sl),
                     "size": trade_size,
                     "strategy_id": strat_id,
+                    "allocation_weight": round(allocation_weight, 6),
                     "status": "open",
                     "open_ts": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
                     "close_ts": None,
@@ -243,6 +316,38 @@ class PaperTrader:
                     close_ts=now_sao_paulo().isoformat(),
                 )
 
+                try:
+                    entry_time = pos.get("open_ts")
+                    if isinstance(entry_time, str):
+                        try:
+                            entry_time_dt = datetime.fromisoformat(entry_time)
+                        except Exception:
+                            entry_time_dt = now_sao_paulo()
+                    else:
+                        entry_time_dt = now_sao_paulo()
+                    if entry_time_dt.tzinfo is None:
+                        entry_time_dt = ensure_timezone(entry_time_dt)
+                    exit_time_dt = now_sao_paulo()
+                    async with AsyncSessionLocal() as trade_session:
+                        strategy_id = str(pos.get("strategy_id")) if pos.get("strategy_id") is not None else None
+                        trade_session.add(
+                            Trade(
+                                asset=asset,
+                                side=DirectionEnum(pos["direction"]),
+                                entry_price=entry,
+                                exit_price=actual_exit,
+                                size=pos["size"],
+                                pnl=round(pnl, 4),
+                                entry_time=entry_time_dt,
+                                exit_time=exit_time_dt,
+                                timeframe=timeframe,
+                                strategy_id=strategy_id,
+                            )
+                        )
+                        await trade_session.commit()
+                except Exception as exc:
+                    logger.warning("Failed to persist paper trade for %s/%s: %s", asset, timeframe, exc)
+
                 # Update statistics
                 stats["capital"] += pnl
                 stats["total_pnl"] += pnl
@@ -274,6 +379,8 @@ class PaperTrader:
         await self._save_positions(r, positions)
         await self._save_stats(r, stats)
         await self._write_portfolio_state(r, positions, stats)
+        await self._persist_closed_trade_history(positions)
+        await self.allocator.refresh_allocations()
         await r.aclose()
         return stats
 

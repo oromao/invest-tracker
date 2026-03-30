@@ -331,7 +331,46 @@ class Trade(Base):
     pnl: Mapped[float] = mapped_column(Float, nullable=False)
     entry_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     exit_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    timeframe: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
     strategy_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class PaperStrategyAllocation(Base):
+    __tablename__ = "paper_strategy_allocations"
+    __table_args__ = (
+        Index("ix_paper_strategy_allocations_strategy_updated", "strategy_id", "updated_at"),
+        Index("ix_paper_strategy_allocations_asset_tf_updated", "asset", "timeframe", "updated_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    strategy_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    asset: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    timeframe: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    lifecycle_state: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    regime: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    allocation_weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    capital_allocated: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    realized_pnl: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    unrealized_pnl: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    net_pnl: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    trade_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    win_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    payoff_ratio: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    max_drawdown: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    recent_pnl: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    recent_win_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    recent_trade_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    backtest_win_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    backtest_profit_factor: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    backtest_sharpe: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    backtest_max_drawdown: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    regime_fit_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    concentration_penalty: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    paper_backtest_delta: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )

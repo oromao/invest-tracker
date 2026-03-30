@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import Counter, Gauge, Histogram, make_asgi_app
+from sqlalchemy import text
 
 from app.config import settings
 from app.db.models import Base
@@ -80,6 +81,8 @@ async def lifespan(app: FastAPI):
     app.state.started_at = now_sao_paulo()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("ALTER TABLE IF EXISTS trades ADD COLUMN IF NOT EXISTS timeframe varchar(8)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trades_strategy_time_exit ON trades (strategy_id, timeframe, exit_time DESC)"))
     logger.info('{"event":"db_tables_ready"}')
 
     # Ensure Qdrant collection (non-fatal)
@@ -278,21 +281,26 @@ async def health():
     # 5. Paper trading stats (non-critical, best-effort)
     try:
         import redis.asyncio as aioredis
-        import json as _json
+        from app.execution.paper_allocator import PaperPortfolioAllocator
+        from app.execution.paper_trader import PaperTrader
         r = aioredis.from_url(settings.redis_url)
-        raw = await r.get("alpha:paper:stats")
         await r.aclose()
-        if raw:
-            stats = _json.loads(raw)
-            checks["paper_trading"] = {
-                "total_trades": stats.get("total_trades", 0),
-                "win_rate": round(stats.get("win_rate", 0.0), 3),
-                "total_pnl": round(stats.get("total_pnl", 0.0), 4),
-                "max_drawdown": round(stats.get("max_drawdown", 0.0), 4),
-                "instability": stats.get("instability", False),
-            }
-        else:
-            checks["paper_trading"] = "no trades yet"
+        trader = PaperTrader()
+        stats = await trader.get_stats()
+        allocator = PaperPortfolioAllocator()
+        allocations = await allocator.current_allocations()
+        checks["paper_trading"] = {
+            "total_trades": stats.get("total_trades", 0),
+            "win_rate": round(stats.get("win_rate", 0.0), 3),
+            "total_pnl": round(stats.get("total_pnl", 0.0), 4),
+            "max_drawdown": round(stats.get("max_drawdown", 0.0), 4),
+            "instability": stats.get("is_unstable", stats.get("instability", False)),
+        }
+        checks["paper_allocation"] = {
+            "strategies": len(allocations),
+            "top_strategy": allocations[0]["strategy_id"] if allocations else None,
+            "top_weight": round(float(allocations[0]["allocation_weight"]), 4) if allocations else 0.0,
+        }
     except Exception as exc:
         checks["paper_trading"] = f"error: {exc}"
 
