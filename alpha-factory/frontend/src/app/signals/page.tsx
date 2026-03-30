@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardTitle, CardValue } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -53,6 +54,11 @@ function fmt(val: number | null | undefined, decimals = 2): string {
 
 export default function SignalsPage() {
   const queryClient = useQueryClient()
+  const [search, setSearch] = useState('')
+  const [directionFilter, setDirectionFilter] = useState<'all' | Signal['direction']>('all')
+  const [regimeFilter, setRegimeFilter] = useState<'all' | string>('all')
+  const [sortKey, setSortKey] = useState<'timestamp' | 'confidence' | 'asset' | 'direction' | 'regime'>('timestamp')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   const { data: signals, isLoading, isError } = useQuery<Signal[]>({
     queryKey: ['signals'],
@@ -65,15 +71,62 @@ export default function SignalsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['signals'] }),
   })
 
-  const displaySignals = (signals ?? []).map((signal) => ({
-    ...signal,
-    confidence: normalizePercent(signal.confidence) / 100,
-  }))
+  const displaySignals = useMemo(() => {
+    const normalized = (signals ?? []).map((signal) => ({
+      ...signal,
+      confidenceScore: normalizePercent(signal.confidence),
+    }))
+
+    const filtered = normalized.filter((signal) => {
+      const q = search.trim().toLowerCase()
+      const matchesSearch =
+        !q ||
+        signal.asset.toLowerCase().includes(q) ||
+        (signal.regime ?? '').toLowerCase().includes(q) ||
+        signal.direction.toLowerCase().includes(q)
+      const matchesDirection = directionFilter === 'all' || signal.direction === directionFilter
+      const matchesRegime = regimeFilter === 'all' || signal.regime === regimeFilter
+      return matchesSearch && matchesDirection && matchesRegime
+    })
+
+    const compare = (a: typeof filtered[number], b: typeof filtered[number]) => {
+      const dir = sortDir === 'asc' ? 1 : -1
+      switch (sortKey) {
+        case 'asset':
+          return a.asset.localeCompare(b.asset) * dir
+        case 'direction':
+          return a.direction.localeCompare(b.direction) * dir
+        case 'regime':
+          return (a.regime ?? '').localeCompare(b.regime ?? '') * dir
+        case 'confidence':
+          return ((a.confidenceScore ?? 0) - (b.confidenceScore ?? 0)) * dir
+        case 'timestamp':
+        default:
+          return (new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()) * dir
+      }
+    }
+
+    return filtered.sort(compare)
+  }, [signals, search, directionFilter, regimeFilter, sortKey, sortDir])
+
+  const availableRegimes = useMemo(
+    () => Array.from(new Set((signals ?? []).map((signal) => signal.regime).filter(Boolean) as string[])),
+    [signals]
+  )
 
   const total = displaySignals.length
   const longs = displaySignals.filter((s) => s.direction === 'LONG').length
   const shorts = displaySignals.filter((s) => s.direction === 'SHORT').length
   const noTrades = displaySignals.filter((s) => s.direction === 'NO_TRADE').length
+
+  const toggleSort = (key: typeof sortKey) => {
+    if (sortKey === key) {
+      setSortDir((current) => (current === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setSortKey(key)
+    setSortDir(key === 'timestamp' ? 'desc' : 'asc')
+  }
 
   return (
     <div className="space-y-6">
@@ -127,6 +180,35 @@ export default function SignalsPage() {
         )}
       </div>
 
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search asset, regime, direction"
+          className="md:col-span-2 bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+        <select
+          value={directionFilter}
+          onChange={(e) => setDirectionFilter(e.target.value as typeof directionFilter)}
+          className="bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+        >
+          <option value="all">All directions</option>
+          <option value="LONG">LONG</option>
+          <option value="SHORT">SHORT</option>
+          <option value="NO_TRADE">NO TRADE</option>
+        </select>
+        <select
+          value={regimeFilter}
+          onChange={(e) => setRegimeFilter(e.target.value)}
+          className="bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+        >
+          <option value="all">All regimes</option>
+          {availableRegimes.map((regime) => (
+            <option key={regime} value={regime}>{regime}</option>
+          ))}
+        </select>
+      </div>
+
       {/* Signals Table — scrollable on mobile */}
       <div className="bg-[#111111] border border-white/10 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-white/8">
@@ -136,14 +218,27 @@ export default function SignalsPage() {
           <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="bg-white/[0.02]">
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">Asset</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">Direction</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">Conf</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">Regime</th>
+                {[
+                  ['asset', 'Asset'],
+                  ['direction', 'Direction'],
+                  ['confidence', 'Conf'],
+                  ['regime', 'Regime'],
+                  ['timestamp', 'Time'],
+                ].map(([key, label]) => (
+                  <th key={key} className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">
+                    <button
+                      type="button"
+                      onClick={() => toggleSort(key as typeof sortKey)}
+                      className="inline-flex items-center gap-1 hover:text-white transition-colors"
+                    >
+                      {label}
+                      {sortKey === key && <span>{sortDir === 'asc' ? '↑' : '↓'}</span>}
+                    </button>
+                  </th>
+                ))}
                 <th className="px-4 py-3 text-right text-xs font-medium text-white/40 uppercase tracking-wider">Entry</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-white/40 uppercase tracking-wider">TP1</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-white/40 uppercase tracking-wider">SL</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">Time</th>
               </tr>
             </thead>
             <tbody>
@@ -160,7 +255,7 @@ export default function SignalsPage() {
                   <tr key={signal.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
                     <td className="px-4 py-3 font-medium text-white whitespace-nowrap">{signal.asset}</td>
                     <td className="px-4 py-3">{directionBadge(signal.direction)}</td>
-                    <td className="px-4 py-3"><ConfidenceBar value={signal.confidence} /></td>
+                    <td className="px-4 py-3"><ConfidenceBar value={signal.confidenceScore / 100} /></td>
                     <td className="px-4 py-3 text-white/60 text-xs">{signal.regime ?? '—'}</td>
                     <td className="px-4 py-3 text-right text-white/80 tabular-nums">{fmt(signal.entry_price)}</td>
                     <td className="px-4 py-3 text-right text-emerald-400/80 tabular-nums">{fmt(signal.tp1)}</td>

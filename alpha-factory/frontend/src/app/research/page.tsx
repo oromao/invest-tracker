@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardTitle, CardValue } from '@/components/ui/card'
@@ -10,6 +11,7 @@ import {
   deprecateStrategy,
   fetchStrategies,
   fetchStrategyLeaderboard,
+  fetchPromotionStatus,
   promoteStrategy,
   runResearchCycle,
 } from '@/utils/api'
@@ -27,6 +29,25 @@ interface Strategy {
   latest_score?: number | null
   latest_reason?: string | null
   latest_metrics?: Record<string, number | string | null> | null
+  promotion_diagnostics?: {
+    baseline_proven_score?: number
+    blockers?: string[]
+    closest_to_promotion?: boolean
+    weak_to_deprecate?: boolean
+    gates?: Record<string, boolean>
+    target?: {
+      strategy_id?: string
+      score?: number
+      sharpe?: number
+      profit_factor?: number
+      max_drawdown?: number
+      total_trades?: number
+      oos_sharpe?: number
+      oos_profit_factor?: number
+      reason?: string
+      lifecycle_state?: string
+    } | null
+  }
 }
 
 type StatusVariant = 'default' | 'warning' | 'success' | 'danger'
@@ -40,6 +61,10 @@ const STATUS_META: Record<Strategy['status'], { variant: StatusVariant; label: s
 
 export default function ResearchPage() {
   const queryClient = useQueryClient()
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | Strategy['status']>('all')
+  const [sortKey, setSortKey] = useState<'updated_at' | 'name' | 'status' | 'score' | 'trades'>('updated_at')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   const { data: strategies, isLoading, isError } = useQuery<Strategy[]>({
     queryKey: ['strategies'],
@@ -50,6 +75,12 @@ export default function ResearchPage() {
     queryKey: ['strategy-leaderboard'],
     queryFn: fetchStrategyLeaderboard,
     staleTime: 15_000,
+  })
+
+  const { data: promotionStatus } = useQuery({
+    queryKey: ['promotion-status'],
+    queryFn: () => fetchPromotionStatus(),
+    staleTime: 10_000,
   })
 
   const researchMutation = useMutation({
@@ -67,10 +98,49 @@ export default function ResearchPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['strategies'] }),
   })
 
-  const displayStrategies = (strategies ?? []).map((strategy) => ({
-    ...strategy,
-    params: strategy.params ?? {},
-  }))
+  const displayStrategies = useMemo(() => {
+    const normalized = (strategies ?? []).map((strategy) => ({
+      ...strategy,
+      params: strategy.params ?? {},
+      score: strategy.latest_score ?? 0,
+      trades: Number(strategy.latest_metrics?.total_trades ?? 0),
+    }))
+    const filtered = normalized.filter((strategy) => {
+      const q = search.trim().toLowerCase()
+      const matchesSearch =
+        !q ||
+        strategy.strategy_id.toLowerCase().includes(q) ||
+        strategy.name.toLowerCase().includes(q) ||
+        (strategy.latest_reason ?? '').toLowerCase().includes(q)
+      const matchesStatus = statusFilter === 'all' || strategy.status === statusFilter
+      return matchesSearch && matchesStatus
+    })
+    const dir = sortDir === 'asc' ? 1 : -1
+    return filtered.sort((a, b) => {
+      switch (sortKey) {
+        case 'name':
+          return a.name.localeCompare(b.name) * dir
+        case 'status':
+          return a.status.localeCompare(b.status) * dir
+        case 'score':
+          return (a.score - b.score) * dir
+        case 'trades':
+          return (a.trades - b.trades) * dir
+        case 'updated_at':
+        default:
+          return (new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime()) * dir
+      }
+    })
+  }, [strategies, search, statusFilter, sortKey, sortDir])
+
+  const toggleSort = (key: typeof sortKey) => {
+    if (sortKey === key) {
+      setSortDir((current) => (current === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setSortKey(key)
+    setSortDir(key === 'updated_at' ? 'desc' : 'asc')
+  }
 
   const active = displayStrategies.filter((s) => s.status === 'active').length
   const candidates = displayStrategies.filter((s) => s.status === 'candidate').length
@@ -117,6 +187,26 @@ export default function ResearchPage() {
         </div>
       )}
 
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search strategy, reason or ID"
+          className="md:col-span-2 bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+          className="bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+        >
+          <option value="all">All statuses</option>
+          <option value="draft">Draft</option>
+          <option value="candidate">Candidate</option>
+          <option value="active">Active</option>
+          <option value="deprecated">Deprecated</option>
+        </select>
+      </div>
+
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
         {isLoading ? (
@@ -140,6 +230,43 @@ export default function ResearchPage() {
               <CardValue className="text-red-400">{deprecated}</CardValue>
             </Card>
           </>
+        )}
+      </div>
+
+      <div className="bg-[#111111] border border-white/10 rounded-xl p-4">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <h2 className="text-sm font-semibold text-white">Promotion Diagnostics</h2>
+            <p className="text-xs text-white/40 mt-0.5">Why the current leader is or is not being auto-promoted</p>
+          </div>
+          <Badge variant={promotionStatus?.closest_to_promotion ? 'success' : 'warning'}>
+            {promotionStatus?.closest_to_promotion ? 'Eligible' : 'Blocked'}
+          </Badge>
+        </div>
+        {!promotionStatus ? (
+          <div className="text-sm text-white/30">Loading promotion state…</div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+            <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+              <div className="text-white/35 text-xs uppercase">Baseline</div>
+              <div className="text-white font-semibold">{Number(promotionStatus.baseline_proven_score ?? 0).toFixed(3)}</div>
+              <div className="text-white/35 text-xs mt-1">Proven active baseline</div>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+              <div className="text-white/35 text-xs uppercase">Top Candidate</div>
+              <div className="text-white font-semibold">{promotionStatus.target?.strategy_id ?? 'n/a'}</div>
+              <div className="text-white/35 text-xs mt-1">
+                score {Number(promotionStatus.target?.score ?? 0).toFixed(3)} · trades {Number(promotionStatus.target?.total_trades ?? 0)}
+              </div>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+              <div className="text-white/35 text-xs uppercase">Blockers</div>
+              <div className="text-white font-semibold">{promotionStatus.blockers?.length ?? 0}</div>
+              <div className="text-white/35 text-xs mt-1">
+                {(promotionStatus.blockers?.length ? promotionStatus.blockers : ['No blockers']).join(' • ')}
+              </div>
+            </div>
+          </div>
         )}
       </div>
 
@@ -222,7 +349,28 @@ export default function ResearchPage() {
       {/* Strategies Table */}
       <div className="bg-[#111111] border border-white/10 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-white/8">
-          <h2 className="text-sm font-semibold text-white">Strategies</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-white">Strategies</h2>
+            <div className="flex flex-wrap items-center gap-1 text-[11px] text-white/35">
+              {([
+                ['name', 'Name'],
+                ['status', 'Status'],
+                ['score', 'Score'],
+                ['trades', 'Trades'],
+                ['updated_at', 'Updated'],
+              ] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => toggleSort(key)}
+                  className="rounded-md border border-white/10 px-2 py-1 hover:text-white hover:border-white/20 transition-colors"
+                >
+                  {label}
+                  {sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

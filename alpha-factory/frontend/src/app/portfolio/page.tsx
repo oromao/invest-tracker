@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardTitle, CardValue } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -61,6 +62,11 @@ function normalizePercent(value: number): number {
 }
 
 export default function PortfolioPage() {
+  const [search, setSearch] = useState('')
+  const [sideFilter, setSideFilter] = useState<'all' | 'LONG' | 'SHORT'>('all')
+  const [sortKey, setSortKey] = useState<'asset' | 'side' | 'size' | 'entry_price' | 'current_price' | 'pnl_usd' | 'pnl_pct'>('pnl_usd')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+
   const { data: rawPortfolio, isLoading, isError } = useQuery<PortfolioSummary>({
     queryKey: ['portfolio'],
     queryFn: fetchPortfolio,
@@ -82,7 +88,44 @@ export default function PortfolioPage() {
       timestamp: new Date().toISOString(),
     }
   )
-  const positions = display.positions.map(normalizePosition)
+  const positions = useMemo(() => {
+    const normalized = display.positions.map(normalizePosition)
+    const filtered = normalized.filter((pos) => {
+      const q = search.trim().toLowerCase()
+      const matchesSearch = !q || pos.asset.toLowerCase().includes(q) || (pos.last_signal_id ?? '').toLowerCase().includes(q)
+      const matchesSide = sideFilter === 'all' || pos.side === sideFilter
+      return matchesSearch && matchesSide
+    })
+    const dir = sortDir === 'asc' ? 1 : -1
+    return filtered.sort((a, b) => {
+      switch (sortKey) {
+        case 'asset':
+          return a.asset.localeCompare(b.asset) * dir
+        case 'side':
+          return a.side.localeCompare(b.side) * dir
+        case 'size':
+          return (a.size - b.size) * dir
+        case 'entry_price':
+          return (a.entry_price - b.entry_price) * dir
+        case 'current_price':
+          return ((a.current_price ?? 0) - (b.current_price ?? 0)) * dir
+        case 'pnl_pct':
+          return (a.pnl_pct - b.pnl_pct) * dir
+        case 'pnl_usd':
+        default:
+          return (a.pnl_usd - b.pnl_usd) * dir
+      }
+    })
+  }, [display.positions, search, sideFilter, sortKey, sortDir])
+
+  const toggleSort = (key: typeof sortKey) => {
+    if (sortKey === key) {
+      setSortDir((current) => (current === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setSortKey(key)
+    setSortDir(key === 'pnl_usd' ? 'desc' : 'asc')
+  }
 
   return (
     <div className="space-y-6">
@@ -97,6 +140,24 @@ export default function PortfolioPage() {
           Failed to fetch portfolio from API — showing empty state.
         </div>
       )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search asset or signal"
+          className="md:col-span-2 bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+        <select
+          value={sideFilter}
+          onChange={(e) => setSideFilter(e.target.value as typeof sideFilter)}
+          className="bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+        >
+          <option value="all">All sides</option>
+          <option value="LONG">LONG</option>
+          <option value="SHORT">SHORT</option>
+        </select>
+      </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
@@ -145,7 +206,30 @@ export default function PortfolioPage() {
       {/* Positions Table */}
       <div className="bg-[#111111] border border-white/10 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-white/8">
-          <h2 className="text-sm font-semibold text-white">Open Positions</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-white">Open Positions</h2>
+            <div className="flex flex-wrap items-center gap-1 text-[11px] text-white/35">
+              {([
+                ['asset', 'Asset'],
+                ['side', 'Side'],
+                ['size', 'Size'],
+                ['entry_price', 'Entry'],
+                ['current_price', 'Current'],
+                ['pnl_usd', 'PnL'],
+                ['pnl_pct', 'PnL %'],
+              ] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => toggleSort(key)}
+                  className="rounded-md border border-white/10 px-2 py-1 hover:text-white hover:border-white/20 transition-colors"
+                >
+                  {label}
+                  {sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

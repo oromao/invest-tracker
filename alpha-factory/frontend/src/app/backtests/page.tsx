@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   LineChart,
   Line,
@@ -43,6 +43,9 @@ export default function BacktestsPage() {
   const queryClient = useQueryClient()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [filterStrategy, setFilterStrategy] = useState<string>('all')
+  const [search, setSearch] = useState('')
+  const [sortKey, setSortKey] = useState<'run_at' | 'sharpe' | 'profit_factor' | 'max_drawdown' | 'win_rate' | 'expectancy' | 'total_trades' | 'asset' | 'strategy_id'>('run_at')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState({ strategy_id: 'momentum_v1', asset: 'BTC/USDT', timeframe: '4h' })
 
@@ -59,18 +62,59 @@ export default function BacktestsPage() {
     },
   })
 
-  const displayBacktests = (backtests ?? []).map((bt) => ({
+  const displayBacktests = useMemo(() => (backtests ?? []).map((bt) => ({
     ...bt,
     strategy_id: bt.strategy_id ?? 'unknown',
     equity_curve_json: bt.equity_curve_json ?? bt.equity_curve ?? [],
-  }))
+  })), [backtests])
 
-  const strategies = Array.from(new Set(displayBacktests.map((b) => String(b.strategy_id))))
+  const strategies = useMemo(() => Array.from(new Set(displayBacktests.map((b) => String(b.strategy_id)))), [displayBacktests])
 
-  const filtered =
-    filterStrategy === 'all'
-      ? displayBacktests
-      : displayBacktests.filter((b) => String(b.strategy_id) === filterStrategy)
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const list = displayBacktests.filter((b) => {
+      const matchesStrategy = filterStrategy === 'all' || String(b.strategy_id) === filterStrategy
+      const matchesSearch =
+        !q ||
+        String(b.strategy_id).toLowerCase().includes(q) ||
+        b.asset.toLowerCase().includes(q) ||
+        b.timeframe.toLowerCase().includes(q)
+      return matchesStrategy && matchesSearch
+    })
+    const dir = sortDir === 'asc' ? 1 : -1
+    return list.sort((a, b) => {
+      switch (sortKey) {
+        case 'sharpe':
+          return (a.sharpe - b.sharpe) * dir
+        case 'profit_factor':
+          return (a.profit_factor - b.profit_factor) * dir
+        case 'max_drawdown':
+          return (a.max_drawdown - b.max_drawdown) * dir
+        case 'win_rate':
+          return (a.win_rate - b.win_rate) * dir
+        case 'expectancy':
+          return (a.expectancy - b.expectancy) * dir
+        case 'total_trades':
+          return (a.total_trades - b.total_trades) * dir
+        case 'asset':
+          return a.asset.localeCompare(b.asset) * dir
+        case 'strategy_id':
+          return String(a.strategy_id).localeCompare(String(b.strategy_id)) * dir
+        case 'run_at':
+        default:
+          return (new Date(a.run_at).getTime() - new Date(b.run_at).getTime()) * dir
+      }
+    })
+  }, [displayBacktests, filterStrategy, search, sortKey, sortDir])
+
+  const toggleSort = (key: typeof sortKey) => {
+    if (sortKey === key) {
+      setSortDir((current) => (current === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setSortKey(key)
+    setSortDir(key === 'run_at' ? 'desc' : 'desc')
+  }
 
   const selected = displayBacktests.find((b) => String(b.id) === selectedId)
 
@@ -109,6 +153,12 @@ export default function BacktestsPage() {
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search strategy, asset or timeframe"
+          className="flex-1 bg-[#111] border border-white/10 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-white/25"
+        />
       </div>
 
       {/* Table */}
@@ -117,16 +167,37 @@ export default function BacktestsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-white/[0.02]">
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">Strategy</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">Asset</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">TF</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-white/40 uppercase tracking-wider">Sharpe</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-white/40 uppercase tracking-wider">PF</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-white/40 uppercase tracking-wider">Max DD</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-white/40 uppercase tracking-wider">Win Rate</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-white/40 uppercase tracking-wider">Expectancy</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-white/40 uppercase tracking-wider">Trades</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-white/40 uppercase tracking-wider">Date</th>
+                {[
+                  ['strategy_id', 'Strategy'],
+                  ['asset', 'Asset'],
+                  ['run_at', 'Date'],
+                  ['sharpe', 'Sharpe'],
+                  ['profit_factor', 'PF'],
+                  ['max_drawdown', 'Max DD'],
+                  ['win_rate', 'Win Rate'],
+                  ['expectancy', 'Expectancy'],
+                  ['total_trades', 'Trades'],
+                ].map(([key, label]) => {
+                  const isNumeric = ['sharpe', 'profit_factor', 'max_drawdown', 'win_rate', 'expectancy', 'total_trades'].includes(key)
+                  return (
+                  <th
+                    key={key}
+                    className={cn(
+                      'px-4 py-3 text-xs font-medium text-white/40 uppercase tracking-wider',
+                      isNumeric ? 'text-right' : 'text-left'
+                    )}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggleSort(key as typeof sortKey)}
+                      className="inline-flex items-center gap-1 hover:text-white transition-colors"
+                    >
+                      {label}
+                      {sortKey === key && <span>{sortDir === 'asc' ? '↑' : '↓'}</span>}
+                    </button>
+                  </th>
+                  )
+                })}
               </tr>
             </thead>
             <tbody>

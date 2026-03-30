@@ -61,6 +61,7 @@ class StrategyResponse(BaseModel):
     latest_score: Optional[float] = None
     latest_reason: Optional[str] = None
     latest_metrics: Optional[Dict[str, Any]] = None
+    promotion_diagnostics: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
 

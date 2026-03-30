@@ -48,6 +48,7 @@ class Settings(BaseSettings):
 
     # Strategy promotion / quant quality gates
     min_trades_for_promotion: int = 30    # minimum trades to be considered for promotion
+    promotion_min_trade_margin: int = 1   # tolerate being 1 trade short if all other gates are strong
     oos_min_sharpe_ratio: float = 0.5     # OOS Sharpe must be >= oos_min_sharpe_ratio * IS Sharpe
     promotion_min_sharpe: float = 1.0
     promotion_min_pf: float = 1.3

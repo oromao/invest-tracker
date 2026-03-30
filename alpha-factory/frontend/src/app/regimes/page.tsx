@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardTitle } from '@/components/ui/card'
@@ -31,16 +32,43 @@ function normalizeConfidence(value: number): number {
 }
 
 export default function RegimesPage() {
+  const [search, setSearch] = useState('')
+  const [regimeFilter, setRegimeFilter] = useState<'all' | Regime['regime']>('all')
+  const [sortKey, setSortKey] = useState<'timestamp' | 'confidence' | 'asset' | 'regime'>('timestamp')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+
   const { data: regimes, isLoading, isError } = useQuery<Regime[]>({
     queryKey: ['regimes'],
     queryFn: fetchRegimes,
     refetchInterval: 30_000,
   })
 
-  const displayRegimes = (regimes ?? []).map((regime) => ({
-    ...regime,
-    confidence: normalizeConfidence(regime.confidence),
-  }))
+  const displayRegimes = useMemo(() => {
+    const normalized = (regimes ?? []).map((regime) => ({
+      ...regime,
+      confidence: normalizeConfidence(regime.confidence),
+    }))
+    const filtered = normalized.filter((regime) => {
+      const q = search.trim().toLowerCase()
+      const matchesSearch = !q || regime.asset.toLowerCase().includes(q) || regime.regime.toLowerCase().includes(q)
+      const matchesRegime = regimeFilter === 'all' || regime.regime === regimeFilter
+      return matchesSearch && matchesRegime
+    })
+    const dir = sortDir === 'asc' ? 1 : -1
+    return filtered.sort((a, b) => {
+      switch (sortKey) {
+        case 'asset':
+          return a.asset.localeCompare(b.asset) * dir
+        case 'regime':
+          return a.regime.localeCompare(b.regime) * dir
+        case 'confidence':
+          return (a.confidence - b.confidence) * dir
+        case 'timestamp':
+        default:
+          return (new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()) * dir
+      }
+    })
+  }, [regimes, search, regimeFilter, sortKey, sortDir])
 
   // Latest regime per asset
   const latestByAsset = ASSETS.reduce<Record<string, Regime>>((acc, asset) => {
@@ -48,6 +76,15 @@ export default function RegimesPage() {
     if (found) acc[asset] = found
     return acc
   }, {})
+
+  const toggleSort = (key: typeof sortKey) => {
+    if (sortKey === key) {
+      setSortDir((current) => (current === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setSortKey(key)
+    setSortDir(key === 'timestamp' ? 'desc' : 'asc')
+  }
 
   return (
     <div className="space-y-6">
@@ -62,6 +99,25 @@ export default function RegimesPage() {
           Failed to fetch regimes from API — showing empty state.
         </div>
       )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search asset or regime"
+          className="md:col-span-2 bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+        <select
+          value={regimeFilter}
+          onChange={(e) => setRegimeFilter(e.target.value as typeof regimeFilter)}
+          className="bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+        >
+          <option value="all">All regimes</option>
+          {Object.keys(REGIME_META).map((regime) => (
+            <option key={regime} value={regime}>{REGIME_META[regime as Regime['regime']].label}</option>
+          ))}
+        </select>
+      </div>
 
       {/* Asset Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
@@ -111,7 +167,22 @@ export default function RegimesPage() {
       {/* History Table */}
       <div className="bg-[#111111] border border-white/10 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-white/8">
-          <h2 className="text-sm font-semibold text-white">Regime History</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-white">Regime History</h2>
+            <div className="flex items-center gap-1 text-[11px] text-white/35">
+              {(['asset', 'regime', 'confidence', 'timestamp'] as const).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => toggleSort(key)}
+                  className="rounded-md border border-white/10 px-2 py-1 hover:text-white hover:border-white/20 transition-colors"
+                >
+                  {key}
+                  {sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

@@ -75,6 +75,28 @@ def score_backtest_metrics(metrics: Dict[str, Any]) -> float:
 
 
 class StrategyMemoryStore:
+    async def best_proven_score(
+        self,
+        session: AsyncSession,
+        *,
+        asset: Optional[str] = None,
+        timeframe: Optional[str] = None,
+    ) -> float:
+        stmt = (
+            select(func.max(StrategyMemory.score))
+            .where(
+                StrategyMemory.event_type == "promoted",
+                StrategyMemory.lifecycle_state.in_(["paper", "micro_live", "live_limited", "live"]),
+            )
+        )
+        if asset:
+            stmt = stmt.where(StrategyMemory.asset == asset)
+        if timeframe:
+            stmt = stmt.where(StrategyMemory.timeframe == timeframe)
+        result = await session.execute(stmt)
+        value = result.scalar_one_or_none()
+        return float(value or 0.0)
+
     async def record_event(
         self,
         session: AsyncSession,
@@ -227,6 +249,97 @@ class StrategyMemoryStore:
                 }
             )
         return winners
+
+    async def promotion_diagnostics(
+        self,
+        session: AsyncSession,
+        *,
+        asset: Optional[str] = None,
+        timeframe: Optional[str] = None,
+        strategy_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        leaderboard = await self.leaderboard(session, asset=asset, timeframe=timeframe, limit=5)
+        best_proven_score = await self.best_proven_score(session, asset=asset, timeframe=timeframe)
+        target = None
+        if strategy_id:
+            for row in leaderboard:
+                if row.strategy_id == strategy_id:
+                    target = row
+                    break
+        if target is None and leaderboard:
+            target = leaderboard[0]
+
+        if target is None:
+            return {
+                "baseline_proven_score": best_proven_score,
+                "target": None,
+                "gates": [],
+                "blockers": ["no strategy found"],
+            }
+
+        from app.backtest.runner import BacktestMetrics
+        from app.config import settings
+        from app.research.lab import _is_weak_enough_to_deprecate
+
+        metrics = BacktestMetrics(
+            sharpe=float(target.sharpe or 0.0),
+            profit_factor=float(target.profit_factor or 0.0),
+            expectancy=float(target.expectancy or 0.0),
+            max_drawdown=float(target.max_drawdown or 0.0),
+            win_rate=float(target.win_rate or 0.0),
+            total_trades=int(target.total_trades or 0),
+            oos_sharpe=float(target.oos_sharpe or 0.0),
+            oos_profit_factor=float(target.oos_profit_factor or 0.0),
+            is_overfit=False,
+        )
+        trade_floor = max(1, settings.min_trades_for_promotion - max(0, int(settings.promotion_min_trade_margin)))
+        score = float(target.score or 0.0)
+        baseline = best_proven_score
+        score_floor = max(settings.promotion_min_sharpe, baseline * 1.15 if baseline > 0 else settings.promotion_min_sharpe)
+        gates = {
+            "score": score >= score_floor,
+            "trades": metrics.total_trades >= trade_floor,
+            "profit_factor": metrics.profit_factor >= settings.promotion_min_pf,
+            "max_drawdown": metrics.max_drawdown <= 0.30,
+            "oos_consistency": metrics.oos_sharpe >= (metrics.sharpe * settings.oos_min_sharpe_ratio if metrics.sharpe else 0.0),
+            "not_overfit": not metrics.is_overfit,
+        }
+        blockers = []
+        if not gates["score"]:
+            blockers.append(f"score {score:.3f} below floor {score_floor:.3f}")
+        if not gates["trades"]:
+            blockers.append(f"trades {metrics.total_trades} below floor {trade_floor}")
+        if not gates["profit_factor"]:
+            blockers.append(f"profit factor {metrics.profit_factor:.3f} below floor {settings.promotion_min_pf:.3f}")
+        if not gates["max_drawdown"]:
+            blockers.append(f"max drawdown {metrics.max_drawdown:.3f} above limit 0.300")
+        if not gates["oos_consistency"]:
+            blockers.append("OOS consistency below threshold")
+        if not gates["not_overfit"]:
+            blockers.append("candidate marked overfit")
+
+        return {
+            "baseline_proven_score": baseline,
+            "target": {
+                "strategy_id": target.strategy_id,
+                "asset": target.asset,
+                "timeframe": target.timeframe,
+                "score": score,
+                "sharpe": metrics.sharpe,
+                "profit_factor": metrics.profit_factor,
+                "max_drawdown": metrics.max_drawdown,
+                "win_rate": metrics.win_rate,
+                "total_trades": metrics.total_trades,
+                "oos_sharpe": metrics.oos_sharpe,
+                "oos_profit_factor": metrics.oos_profit_factor,
+                "lifecycle_state": target.lifecycle_state,
+                "reason": target.reason,
+            },
+            "gates": gates,
+            "blockers": blockers,
+            "closest_to_promotion": not blockers,
+            "weak_to_deprecate": _is_weak_enough_to_deprecate(metrics, score, baseline),
+        }
 
 
 def mutate_variant(base: Dict[str, Any], *, seed_score: float = 0.0) -> Dict[str, Any]:

@@ -62,6 +62,12 @@ async def list_strategies(
                     row.latest_metrics = json.loads(latest.metrics_json)
                 except Exception:
                     row.latest_metrics = None
+            row.promotion_diagnostics = await memory_store.promotion_diagnostics(
+                db,
+                asset=latest.asset,
+                timeframe=latest.timeframe,
+                strategy_id=s.strategy_id,
+            )
         response.append(row)
     return response
 
@@ -105,6 +111,22 @@ async def strategy_leaderboard(
             )
         )
     return response
+
+
+@router.get("/promotion-status")
+async def promotion_status(
+    asset: Optional[str] = None,
+    timeframe: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    rows = await memory_store.leaderboard(db, asset=asset, timeframe=timeframe, limit=5)
+    top_strategy_id = rows[0].strategy_id if rows else None
+    return await memory_store.promotion_diagnostics(
+        db,
+        asset=asset,
+        timeframe=timeframe,
+        strategy_id=top_strategy_id,
+    )
 
 
 @router.post("/run", status_code=202)
