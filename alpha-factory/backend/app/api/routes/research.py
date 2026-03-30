@@ -8,7 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.schemas import ResearchCycleRequest, StatusUpdateRequest, StrategyResponse
+from app.api.schemas import EvolutionCycleResponse, ResearchCycleRequest, StatusUpdateRequest, StrategyResponse
 from app.db.models import Strategy, StrategyStatusEnum
 from app.db.session import get_db
 from app.registry.strategies import StrategyRegistry
@@ -139,6 +139,54 @@ async def promotion_status(
         timeframe=timeframe,
         strategy_id=top_strategy_id,
     )
+
+
+@router.get("/evolution", response_model=List[EvolutionCycleResponse])
+async def evolution_timeline(
+    asset: Optional[str] = None,
+    timeframe: Optional[str] = None,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+):
+    rows = await memory_store.recent_evolution_cycles(db, asset=asset, timeframe=timeframe, limit=limit)
+    payload: List[EvolutionCycleResponse] = []
+    for row in rows:
+        try:
+            blockers = json.loads(row.promotion_blockers_json) if row.promotion_blockers_json else []
+        except Exception:
+            blockers = []
+        try:
+            deprecated = json.loads(row.deprecated_strategy_ids_json) if row.deprecated_strategy_ids_json else []
+        except Exception:
+            deprecated = []
+        try:
+            diagnostics = json.loads(row.promotion_diagnostics_json) if row.promotion_diagnostics_json else None
+        except Exception:
+            diagnostics = None
+        payload.append(
+            EvolutionCycleResponse(
+                id=row.id,
+                asset=row.asset,
+                timeframe=row.timeframe,
+                cycle_at=to_sao_paulo(row.cycle_at),
+                baseline_active_strategy_id=row.baseline_active_strategy_id,
+                baseline_active_score=row.baseline_active_score,
+                top_candidate_strategy_id=row.top_candidate_strategy_id,
+                top_candidate_score=row.top_candidate_score,
+                promotion_attempted=row.promotion_attempted,
+                promotion_succeeded=row.promotion_succeeded,
+                promotion_blockers=blockers,
+                deprecated_strategy_ids=deprecated,
+                competition_mode=row.competition_mode,
+                previous_active_strategy_id=row.previous_active_strategy_id,
+                current_active_strategy_id=row.current_active_strategy_id,
+                leader_changed=row.leader_changed,
+                leader_change_reason=row.leader_change_reason,
+                promotion_diagnostics=diagnostics,
+                created_at=to_sao_paulo(row.created_at),
+            )
+        )
+    return payload
 
 
 @router.post("/run", status_code=202)

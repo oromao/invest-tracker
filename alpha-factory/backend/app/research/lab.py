@@ -601,6 +601,13 @@ class ResearchLab:
             features_df = await self._load_features_df(session, asset, timeframe)
             current_regime = await self._get_current_regime(session, asset, timeframe)
             promotion_baseline_score = await self._load_baseline_score(session, asset, timeframe)
+            baseline_active = await registry.get_best_strategy(session, asset=asset, timeframe=timeframe)
+            previous_active_strategy_id = (
+                baseline_active["strategy"].strategy_id if baseline_active and baseline_active.get("strategy") else None
+            )
+            previous_active_score = (
+                float(baseline_active["memory"].score or 0.0) if baseline_active and baseline_active.get("memory") else 0.0
+            )
             variants = await self._build_candidate_pool(session, asset, timeframe)
 
             for variant in variants:
@@ -803,6 +810,46 @@ class ResearchLab:
                 promotion_baseline_score,
                 float((promotion_candidate or top)["score"]),
             )
+            current_active = await registry.get_best_strategy(session, asset=asset, timeframe=timeframe)
+            current_active_strategy_id = (
+                current_active["strategy"].strategy_id if current_active and current_active.get("strategy") else None
+            )
+            current_active_score = (
+                float(current_active["memory"].score or 0.0) if current_active and current_active.get("memory") else 0.0
+            )
+            leader_changed = previous_active_strategy_id != current_active_strategy_id
+            leader_change_reason = None
+            if leader_changed:
+                leader_change_reason = (
+                    f"leader changed from {previous_active_strategy_id or 'none'} to {current_active_strategy_id or 'none'}"
+                    f" (prev_score={previous_active_score:.3f}, new_score={current_active_score:.3f})"
+                )
+            else:
+                leader_change_reason = (
+                    f"leader unchanged at {current_active_strategy_id or 'none'}"
+                    f" (score={current_active_score:.3f})"
+                )
+            cycle_at = now_sao_paulo()
+            await memory_store.record_evolution_cycle(
+                session,
+                asset=asset,
+                timeframe=timeframe,
+                cycle_at=cycle_at,
+                baseline_active_strategy_id=previous_active_strategy_id,
+                baseline_active_score=previous_active_score,
+                top_candidate_strategy_id=promotion_candidate["strategy_id"] if promotion_candidate else top["strategy_id"],
+                top_candidate_score=float((promotion_candidate or top)["score"]),
+                promotion_attempted=True,
+                promotion_succeeded=bool(auto_promoted_strategy_id),
+                promotion_blockers=promotion_diagnostics.get("blockers", []) if promotion_diagnostics else [],
+                deprecated_strategy_ids=auto_deprecated,
+                competition_mode=promotion_diagnostics.get("competition_mode") if promotion_diagnostics else "current_active_baseline",
+                previous_active_strategy_id=previous_active_strategy_id,
+                current_active_strategy_id=current_active_strategy_id,
+                leader_changed=leader_changed,
+                leader_change_reason=leader_change_reason,
+                promotion_diagnostics=promotion_diagnostics,
+            )
             await session.commit()
 
             return {
@@ -817,4 +864,8 @@ class ResearchLab:
                 "auto_promoted_strategy_id": auto_promoted_strategy_id,
                 "auto_deprecated_strategy_ids": auto_deprecated,
                 "promotion_diagnostics": promotion_diagnostics,
+                "leader_changed": leader_changed,
+                "previous_active_strategy_id": previous_active_strategy_id,
+                "current_active_strategy_id": current_active_strategy_id,
+                "leader_change_reason": leader_change_reason,
             }

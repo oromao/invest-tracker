@@ -10,6 +10,7 @@ from sqlalchemy import desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Strategy, StrategyMemory, StrategyStatusEnum
+from app.db.models import EvolutionCycle
 from app.shared.time import now_sao_paulo, to_sao_paulo
 
 logger = logging.getLogger(__name__)
@@ -405,6 +406,68 @@ class StrategyMemoryStore:
             "weak_to_deprecate": _is_weak_enough_to_deprecate(metrics, score, baseline),
             "current_active_score": best_active_score,
         }
+
+    async def record_evolution_cycle(
+        self,
+        session: AsyncSession,
+        *,
+        asset: str,
+        timeframe: str,
+        cycle_at,
+        baseline_active_strategy_id: Optional[str],
+        baseline_active_score: Optional[float],
+        top_candidate_strategy_id: Optional[str],
+        top_candidate_score: Optional[float],
+        promotion_attempted: bool,
+        promotion_succeeded: bool,
+        promotion_blockers: Optional[list[str]] = None,
+        deprecated_strategy_ids: Optional[list[str]] = None,
+        competition_mode: Optional[str] = None,
+        previous_active_strategy_id: Optional[str] = None,
+        current_active_strategy_id: Optional[str] = None,
+        leader_changed: bool = False,
+        leader_change_reason: Optional[str] = None,
+        promotion_diagnostics: Optional[Dict[str, Any]] = None,
+    ) -> EvolutionCycle:
+        row = EvolutionCycle(
+            asset=asset,
+            timeframe=timeframe,
+            cycle_at=cycle_at,
+            baseline_active_strategy_id=baseline_active_strategy_id,
+            baseline_active_score=baseline_active_score,
+            top_candidate_strategy_id=top_candidate_strategy_id,
+            top_candidate_score=top_candidate_score,
+            promotion_attempted=promotion_attempted,
+            promotion_succeeded=promotion_succeeded,
+            promotion_blockers_json=json.dumps(_json_safe(promotion_blockers or [])),
+            deprecated_strategy_ids_json=json.dumps(_json_safe(deprecated_strategy_ids or [])),
+            competition_mode=competition_mode,
+            previous_active_strategy_id=previous_active_strategy_id,
+            current_active_strategy_id=current_active_strategy_id,
+            leader_changed=leader_changed,
+            leader_change_reason=leader_change_reason,
+            promotion_diagnostics_json=json.dumps(_json_safe(promotion_diagnostics or {})),
+            created_at=now_sao_paulo(),
+        )
+        session.add(row)
+        await session.flush()
+        return row
+
+    async def recent_evolution_cycles(
+        self,
+        session: AsyncSession,
+        *,
+        asset: Optional[str] = None,
+        timeframe: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[EvolutionCycle]:
+        stmt = select(EvolutionCycle).order_by(desc(EvolutionCycle.cycle_at), desc(EvolutionCycle.id)).limit(limit)
+        if asset:
+            stmt = stmt.where(EvolutionCycle.asset == asset)
+        if timeframe:
+            stmt = stmt.where(EvolutionCycle.timeframe == timeframe)
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
 
 
 def mutate_variant(base: Dict[str, Any], *, seed_score: float = 0.0) -> Dict[str, Any]:

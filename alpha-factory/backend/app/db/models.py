@@ -6,6 +6,7 @@ from typing import Optional
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     Enum,
     Float,
@@ -237,6 +238,36 @@ class StrategyMemory(Base):
     params_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     metrics_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class EvolutionCycle(Base):
+    __tablename__ = "evolution_cycles"
+    __table_args__ = (
+        Index("ix_evolution_cycles_asset_tf_created", "asset", "timeframe", "created_at"),
+        Index("ix_evolution_cycles_leader_change", "leader_changed", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    asset: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    timeframe: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    cycle_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    baseline_active_strategy_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    baseline_active_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    top_candidate_strategy_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    top_candidate_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    promotion_attempted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    promotion_succeeded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    promotion_blockers_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    deprecated_strategy_ids_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    competition_mode: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    previous_active_strategy_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    current_active_strategy_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    leader_changed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    leader_change_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    promotion_diagnostics_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

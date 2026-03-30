@@ -47,6 +47,16 @@ const navItems = [
     ),
   },
   {
+    href: '/evolution',
+    label: 'Evolution',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+        <path d="M4 19V5m0 14h16" />
+        <path d="M6 15l4-4 3 3 5-7" />
+      </svg>
+    ),
+  },
+  {
     href: '/portfolio',
     label: 'Portfolio',
     icon: (

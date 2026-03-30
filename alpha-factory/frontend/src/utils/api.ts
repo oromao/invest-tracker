@@ -49,6 +49,11 @@ export const fetchPromotionStatus = async (payload: { asset?: string; timeframe?
   return data;
 };
 
+export const fetchEvolutionTimeline = async (payload: { asset?: string; timeframe?: string; limit?: number } = {}) => {
+  const { data } = await api.get("/api/research/evolution", { params: payload });
+  return data;
+};
+
 export const runResearchCycle = async (payload: { asset: string; timeframe: string }) => {
   const { data } = await api.post("/api/research/run", payload);
   return data;

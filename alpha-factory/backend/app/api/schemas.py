@@ -141,3 +141,25 @@ class HealthResponse(BaseModel):
     version: str
     timestamp: datetime
     jobs: List[SchedulerJobInfo] = []
+
+
+class EvolutionCycleResponse(BaseModel):
+    id: int
+    asset: str
+    timeframe: str
+    cycle_at: datetime
+    baseline_active_strategy_id: Optional[str] = None
+    baseline_active_score: Optional[float] = None
+    top_candidate_strategy_id: Optional[str] = None
+    top_candidate_score: Optional[float] = None
+    promotion_attempted: bool
+    promotion_succeeded: bool
+    promotion_blockers: List[str] = []
+    deprecated_strategy_ids: List[str] = []
+    competition_mode: Optional[str] = None
+    previous_active_strategy_id: Optional[str] = None
+    current_active_strategy_id: Optional[str] = None
+    leader_changed: bool = False
+    leader_change_reason: Optional[str] = None
+    promotion_diagnostics: Optional[Dict[str, Any]] = None
+    created_at: datetime
