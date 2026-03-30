@@ -86,6 +86,26 @@ async def strategy_leaderboard(
         strat = await registry.get_by_strategy_id(db, row.strategy_id)
         if strat is None:
             continue
+        latest = await memory_store.latest_state(db, strat.strategy_id)
+        lifecycle_state = row.lifecycle_state
+        latest_reason = row.reason
+        latest_metrics = {
+            "sharpe": row.sharpe,
+            "profit_factor": row.profit_factor,
+            "win_rate": row.win_rate,
+            "total_trades": row.total_trades,
+            "max_drawdown": row.max_drawdown,
+            "oos_sharpe": row.oos_sharpe,
+            "oos_profit_factor": row.oos_profit_factor,
+        }
+        if latest is not None:
+            lifecycle_state = latest.lifecycle_state or lifecycle_state
+            latest_reason = latest.reason or latest_reason
+            if latest.metrics_json:
+                try:
+                    latest_metrics = json.loads(latest.metrics_json)
+                except Exception:
+                    pass
         response.append(
             StrategyResponse(
                 id=strat.id,
@@ -94,18 +114,10 @@ async def strategy_leaderboard(
                 name=strat.name,
                 params=json.loads(strat.params_json) if strat.params_json else None,
                 status=strat.status.value if hasattr(strat.status, "value") else strat.status,
-                lifecycle_state=row.lifecycle_state,
+                lifecycle_state=lifecycle_state,
                 latest_score=row.score,
-                latest_reason=row.reason,
-                latest_metrics={
-                    "sharpe": row.sharpe,
-                    "profit_factor": row.profit_factor,
-                    "win_rate": row.win_rate,
-                    "total_trades": row.total_trades,
-                    "max_drawdown": row.max_drawdown,
-                    "oos_sharpe": row.oos_sharpe,
-                    "oos_profit_factor": row.oos_profit_factor,
-                },
+                latest_reason=latest_reason,
+                latest_metrics=latest_metrics,
                 created_at=to_sao_paulo(strat.created_at),
                 updated_at=to_sao_paulo(strat.updated_at),
             )

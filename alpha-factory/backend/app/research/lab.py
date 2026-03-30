@@ -775,6 +775,7 @@ class ResearchLab:
                 promotion_baseline_score,
                 float((promotion_candidate or top)["score"]),
             )
+            await session.commit()
 
             return {
                 "asset": asset,
