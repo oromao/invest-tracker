@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
+from datetime import datetime
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+import redis.asyncio as aioredis
 from prometheus_client import Counter, Gauge
 
 from app.config import settings
@@ -48,6 +51,43 @@ _JOB_TIMEOUTS = {
     "paper_decay_job": 60,
 }
 
+JOB_INTERVAL_MINUTES = {
+    "ingest_job": 5,
+    "features_job": 15,
+    "regime_job": 60,
+    "label_job": 60,
+    "research_job": 360,
+    "signal_job": 15,
+    "execution_job": 1,
+    "sync_positions_job": 15,
+    "audit_job": 60,
+    "drift_job": 120,
+    "paper_ingest_job": 15,
+    "paper_update_job": 5,
+    "paper_decay_job": 120,
+    "watchdog_job": 10,
+}
+
+
+def _heartbeat_key(job_id: str) -> str:
+    return f"alpha:scheduler:heartbeat:{job_id}"
+
+
+async def _record_heartbeat(job_id: str, status: str, duration: float | None = None, error: str | None = None) -> None:
+    try:
+        r = aioredis.from_url(settings.redis_url, decode_responses=True)
+        payload = {
+            "job_id": job_id,
+            "status": status,
+            "duration": duration,
+            "error": error,
+            "timestamp": now_sao_paulo().isoformat(),
+        }
+        await r.set(_heartbeat_key(job_id), json.dumps(payload), ex=24 * 3600)
+        await r.aclose()
+    except Exception as exc:
+        logger.debug("Heartbeat write failed for %s: %s", job_id, exc)
+
 
 async def _run_with_instrumentation(job_id: str, coro) -> None:
     """Wrap a job coroutine with timeout, metrics, and error isolation."""
@@ -59,12 +99,15 @@ async def _run_with_instrumentation(job_id: str, coro) -> None:
         duration = time.monotonic() - start
         _JOB_DURATION.labels(job_id=job_id).set(duration)
         logger.info("Job %s completed in %.1fs", job_id, duration)
+        await _record_heartbeat(job_id, "ok", duration=duration)
     except asyncio.TimeoutError:
         _JOB_FAILURES.labels(job_id=job_id).inc()
         logger.error("Job %s TIMED OUT after %ds", job_id, timeout)
+        await _record_heartbeat(job_id, "timeout", duration=timeout, error="timeout")
     except Exception as exc:
         _JOB_FAILURES.labels(job_id=job_id).inc()
         logger.error("Job %s FAILED: %s", job_id, exc, exc_info=True)
+        await _record_heartbeat(job_id, "error", duration=time.monotonic() - start, error=str(exc))
 
 
 async def _ingest_coro() -> None:
@@ -208,6 +251,58 @@ async def _paper_decay_coro() -> None:
         logger.warning("Paper trader demoted %d decayed strategies", demoted)
 
 
+async def _watchdog_coro() -> None:
+    r = None
+    try:
+        r = aioredis.from_url(settings.redis_url, decode_responses=True)
+        now = now_sao_paulo()
+        stale = []
+        for job_id in ("ingest_job", "features_job", "regime_job", "signal_job", "research_job", "paper_update_job", "paper_decay_job"):
+            raw = await r.get(f"alpha:scheduler:heartbeat:{job_id}")
+            if not raw:
+                stale.append(job_id)
+                continue
+            payload = json.loads(raw)
+            interval_min = JOB_INTERVAL_MINUTES.get(job_id, 10)
+            try:
+                hb_ts = datetime.fromisoformat(payload["timestamp"])
+            except Exception:
+                stale.append(job_id)
+                continue
+            age_min = (now - hb_ts).total_seconds() / 60.0
+            if age_min > interval_min * 3:
+                stale.append(job_id)
+    except Exception as exc:
+        logger.warning("Watchdog heartbeat scan failed: %s", exc)
+        stale = ["ingest_job", "features_job", "regime_job", "signal_job", "research_job"]
+    finally:
+        if r is not None:
+            try:
+                await r.aclose()
+            except Exception:
+                pass
+
+    if not stale:
+        logger.info("Watchdog healthy: no stale jobs detected")
+        return
+
+    logger.warning("Watchdog detected stale jobs: %s", ", ".join(stale))
+    if "ingest_job" in stale:
+        await _run_ingest_job()
+    if "features_job" in stale:
+        await _run_features_job()
+    if "regime_job" in stale:
+        await _run_regime_job()
+    if "signal_job" in stale:
+        await _run_signal_job()
+    if "research_job" in stale:
+        await _run_research_job()
+    if "paper_update_job" in stale:
+        await _run_paper_update_job()
+    if "paper_decay_job" in stale:
+        await _run_paper_decay_job()
+
+
 async def _run_ingest_job() -> None:
     await _run_with_instrumentation("ingest_job", _ingest_coro())
 
@@ -258,6 +353,10 @@ async def _run_paper_update_job() -> None:
 
 async def _run_paper_decay_job() -> None:
     await _run_with_instrumentation("paper_decay_job", _paper_decay_coro())
+
+
+async def _run_watchdog_job() -> None:
+    await _run_with_instrumentation("watchdog_job", _watchdog_coro())
 
 
 class AlphaScheduler:
@@ -383,6 +482,15 @@ class AlphaScheduler:
             max_instances=1,
             coalesce=True,
         )
+        self.scheduler.add_job(
+            _run_watchdog_job,
+            trigger=IntervalTrigger(minutes=10),
+            id="watchdog_job",
+            name="Autonomy Watchdog",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
 
     def start(self) -> None:
         self.scheduler.start()
@@ -417,4 +525,5 @@ class AlphaScheduler:
         await _run_execution_job()
         await _run_sync_positions_job()
         await _run_audit_job()
+        await _run_watchdog_job()
         logger.info("Initial pipeline jobs complete")

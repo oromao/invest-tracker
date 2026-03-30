@@ -183,15 +183,26 @@ class SignalEngine:
         result = await session.execute(stmt)
         positions = result.scalars().all()
         
-        open_pos_dicts = [
-            {"asset": p.asset, "direction": p.side.value} for p in positions
-        ]
+        open_pos_dicts = []
+        for p in positions:
+            side = getattr(p, "side", None)
+            if hasattr(side, "value"):
+                direction = side.value
+            elif isinstance(side, str):
+                direction = side
+            else:
+                logger.warning("Skipping open position with missing side for asset=%s", getattr(p, "asset", "unknown"))
+                continue
+            open_pos_dicts.append({"asset": p.asset, "direction": direction})
         
         # 3. Calculate exposure
         total_exposure = 0.0
         for p in positions:
             # We use latest features or bar for current value
-            total_exposure += (p.size * p.entry_price) / max(capital, 1.0)
+            size = float(getattr(p, "size", 0.0) or 0.0)
+            entry_price = float(getattr(p, "entry_price", 0.0) or 0.0)
+            if size > 0 and entry_price > 0:
+                total_exposure += (size * entry_price) / max(capital, 1.0)
 
         return PortfolioState(
             capital=capital,
@@ -279,12 +290,30 @@ class SignalEngine:
             regime_obj = await regime_detector.get_latest_regime(session, asset, timeframe)
             current_regime = regime_obj.regime.value if regime_obj else None
 
-            # 3. Get active strategy (ONLY active/candidate, NEVER deprecated)
+            # 3. Pick the strongest strategy for the current market state.
             active_strategy = None
-            active_strategies = await strategy_registry.get_active_strategies(session)
-            # Ensure we only pick non-deprecated
-            active_strategies = [s for s in active_strategies if s.status != StrategyStatusEnum.deprecated]
-            active_strategy = active_strategies[0] if active_strategies else None
+            ranked = await strategy_registry.memory.leaderboard(
+                session, asset=asset, timeframe=timeframe, limit=8
+            )
+            for ranked_row in ranked:
+                strat = await strategy_registry.get_by_strategy_id(session, ranked_row.strategy_id)
+                if strat is None or strat.status == StrategyStatusEnum.deprecated:
+                    continue
+                params = {}
+                if strat.params_json:
+                    try:
+                        params = json.loads(strat.params_json)
+                    except Exception:
+                        params = {}
+                allowed = params.get("regime", [])
+                if not allowed or not current_regime or current_regime in allowed:
+                    active_strategy = strat
+                    break
+
+            if active_strategy is None:
+                active_strategies = await strategy_registry.get_active_strategies(session)
+                active_strategies = [s for s in active_strategies if s.status != StrategyStatusEnum.deprecated]
+                active_strategy = active_strategies[0] if active_strategies else None
 
             if active_strategy is None:
                 candidates = await strategy_registry.get_candidates(session)

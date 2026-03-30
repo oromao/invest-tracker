@@ -57,7 +57,7 @@ class RiskEngine:
             1
             for pos in open_positions
             if pos.get("asset", "").split("/")[0] == base_asset
-            and pos.get("direction") == signal.direction
+            and (pos.get("direction") or pos.get("side")) == signal.direction
         )
         return count < threshold
 
@@ -102,8 +102,11 @@ class RiskEngine:
             return False
 
         # 3. Directional Delta (LONG - SHORT)
-        longs = sum(p["size"] for p in portfolio.open_positions if p["side"] == "LONG")
-        shorts = sum(p["size"] for p in portfolio.open_positions if p["side"] == "SHORT")
+        def _position_direction(pos: Dict) -> Optional[str]:
+            return pos.get("direction") or pos.get("side")
+
+        longs = sum(float(p.get("size", 0.0) or 0.0) for p in portfolio.open_positions if _position_direction(p) == "LONG")
+        shorts = sum(float(p.get("size", 0.0) or 0.0) for p in portfolio.open_positions if _position_direction(p) == "SHORT")
         net_delta = (longs - shorts) / max(portfolio.capital, 1.0)
         
         # If signal is LONG and we are already too LONG, veto
@@ -116,7 +119,7 @@ class RiskEngine:
              return False
 
         # 4. Max positions per asset
-        asset_count = sum(1 for p in portfolio.open_positions if p["asset"] == signal.asset)
+        asset_count = sum(1 for p in portfolio.open_positions if p.get("asset") == signal.asset)
         if asset_count >= settings.risk_max_positions_per_asset:
             logger.warning("Signal VETOED %s: Max positions reached (%d)", signal.asset, asset_count)
             return False

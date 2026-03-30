@@ -39,6 +39,11 @@ export const fetchStrategies = async () => {
   return data;
 };
 
+export const fetchStrategyLeaderboard = async () => {
+  const { data } = await api.get("/api/research/leaderboard");
+  return data;
+};
+
 export const runResearchCycle = async (payload: { asset: string; timeframe: string }) => {
   const { data } = await api.post("/api/research/run", payload);
   return data;

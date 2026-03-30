@@ -9,6 +9,7 @@ import { formatSaoPauloDateTime } from '@/lib/time'
 import {
   deprecateStrategy,
   fetchStrategies,
+  fetchStrategyLeaderboard,
   promoteStrategy,
   runResearchCycle,
 } from '@/utils/api'
@@ -22,6 +23,10 @@ interface Strategy {
   params: Record<string, unknown>
   created_at: string
   updated_at: string
+  lifecycle_state?: string | null
+  latest_score?: number | null
+  latest_reason?: string | null
+  latest_metrics?: Record<string, number | string | null> | null
 }
 
 type StatusVariant = 'default' | 'warning' | 'success' | 'danger'
@@ -39,6 +44,12 @@ export default function ResearchPage() {
   const { data: strategies, isLoading, isError } = useQuery<Strategy[]>({
     queryKey: ['strategies'],
     queryFn: fetchStrategies,
+  })
+
+  const { data: leaderboard } = useQuery<Strategy[]>({
+    queryKey: ['strategy-leaderboard'],
+    queryFn: fetchStrategyLeaderboard,
+    staleTime: 15_000,
   })
 
   const researchMutation = useMutation({
@@ -66,6 +77,7 @@ export default function ResearchPage() {
   const drafts = displayStrategies.filter((s) => s.status === 'draft').length
   const deprecated = displayStrategies.filter((s) => s.status === 'deprecated').length
   const total = displayStrategies.length
+  const bestStrategies = (leaderboard ?? []).slice(0, 5)
 
   return (
     <div className="space-y-6">
@@ -128,6 +140,57 @@ export default function ResearchPage() {
               <CardValue className="text-red-400">{deprecated}</CardValue>
             </Card>
           </>
+        )}
+      </div>
+
+      {/* Best Strategies */}
+      <div className="bg-[#111111] border border-white/10 rounded-xl p-4">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 className="text-sm font-semibold text-white">Best Strategies</h2>
+            <p className="text-xs text-white/40 mt-0.5">Ranked by robust backtest score and lifecycle progress</p>
+          </div>
+        </div>
+        {bestStrategies.length === 0 ? (
+          <div className="text-sm text-white/30">No ranked strategies yet. Run the research cycle.</div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {bestStrategies.map((strategy, index) => (
+              <div key={strategy.strategy_id} className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-xs text-white/40">#{index + 1}</div>
+                    <div className="font-medium text-white">{strategy.name}</div>
+                    <div className="text-[11px] text-white/40 font-mono">{strategy.strategy_id}</div>
+                  </div>
+                  <Badge variant={strategy.lifecycle_state === 'paper' || strategy.status === 'active' ? 'success' : strategy.status === 'candidate' ? 'warning' : 'default'}>
+                    {strategy.lifecycle_state || strategy.status}
+                  </Badge>
+                </div>
+                <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                  <div className="rounded-md bg-black/20 p-2">
+                    <div className="text-white/30">Score</div>
+                    <div className="text-white font-semibold">{(strategy.latest_score ?? 0).toFixed(3)}</div>
+                  </div>
+                  <div className="rounded-md bg-black/20 p-2">
+                    <div className="text-white/30">Sharpe</div>
+                    <div className="text-white font-semibold">{Number(strategy.latest_metrics?.sharpe ?? 0).toFixed(2)}</div>
+                  </div>
+                  <div className="rounded-md bg-black/20 p-2">
+                    <div className="text-white/30">PF</div>
+                    <div className="text-white font-semibold">{Number(strategy.latest_metrics?.profit_factor ?? 0).toFixed(2)}</div>
+                  </div>
+                  <div className="rounded-md bg-black/20 p-2">
+                    <div className="text-white/30">Trades</div>
+                    <div className="text-white font-semibold">{Number(strategy.latest_metrics?.total_trades ?? 0)}</div>
+                  </div>
+                </div>
+                <div className="mt-3 text-xs text-white/45">
+                  {strategy.latest_reason || 'No evaluation note recorded'}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 

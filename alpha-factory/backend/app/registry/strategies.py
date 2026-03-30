@@ -5,16 +5,20 @@ import logging
 import uuid
 from typing import Dict, List, Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Strategy, StrategyStatusEnum
+from app.db.models import Strategy, StrategyMemory, StrategyStatusEnum
+from app.research.memory import StrategyMemoryStore
 from app.shared.time import now_sao_paulo
 
 logger = logging.getLogger(__name__)
 
 
 class StrategyRegistry:
+    def __init__(self) -> None:
+        self.memory = StrategyMemoryStore()
+
     async def create_strategy(
         self,
         session: AsyncSession,
@@ -91,6 +95,41 @@ class StrategyRegistry:
         stmt = select(Strategy).order_by(Strategy.created_at.desc())
         result = await session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_with_latest_state(self, session: AsyncSession) -> List[Dict]:
+        rows = await self.list_all(session)
+        payload: List[Dict] = []
+        for strat in rows:
+            latest_state = await self.memory.latest_state(session, strat.strategy_id)
+            payload.append(
+                {
+                    "strategy": strat,
+                    "latest_state": latest_state,
+                }
+            )
+        return payload
+
+    async def get_best_strategy(
+        self,
+        session: AsyncSession,
+        *,
+        asset: Optional[str] = None,
+        timeframe: Optional[str] = None,
+    ) -> Optional[Dict]:
+        leaderboard = await self.memory.leaderboard(session, asset=asset, timeframe=timeframe, limit=1)
+        if leaderboard:
+            best = leaderboard[0]
+            strat = await self.get_by_strategy_id(session, best.strategy_id)
+            return {"strategy": strat, "memory": best}
+
+        candidates = await self.get_active_strategies(session)
+        if not candidates:
+            candidates = await self.get_candidates(session)
+        if not candidates:
+            return None
+        strat = candidates[0]
+        latest = await self.memory.latest_state(session, strat.strategy_id)
+        return {"strategy": strat, "memory": latest}
 
     async def get_or_create_draft(
         self,

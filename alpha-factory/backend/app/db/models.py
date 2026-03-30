@@ -212,6 +212,36 @@ class Signal(Base):
     strategy: Mapped[Optional["Strategy"]] = relationship("Strategy", back_populates="signals")
 
 
+class StrategyMemory(Base):
+    __tablename__ = "strategy_memory"
+    __table_args__ = (
+        Index("ix_strategy_memory_strategy_event", "strategy_id", "event_type", "created_at"),
+        Index("ix_strategy_memory_asset_tf_created", "asset", "timeframe", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    strategy_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    asset: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    timeframe: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    lifecycle_state: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    sharpe: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    profit_factor: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    expectancy: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    max_drawdown: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    win_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    total_trades: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    oos_sharpe: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    oos_profit_factor: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    params_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metrics_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class RagDocument(Base):
     __tablename__ = "rag_documents"
 

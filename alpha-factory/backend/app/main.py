@@ -77,6 +77,7 @@ DATA_FRESHNESS = Gauge(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Create DB tables (idempotent)
+    app.state.started_at = now_sao_paulo()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info('{"event":"db_tables_ready"}')
@@ -244,6 +245,35 @@ async def health():
             overall = "degraded"
     except Exception as exc:
         checks["scheduler"] = f"error: {exc}"
+
+    # 4b. Scheduler heartbeats / staleness watchdog
+    try:
+        import json as _json
+        import redis.asyncio as aioredis
+        from app.scheduler.jobs import JOB_INTERVAL_MINUTES
+
+        r = aioredis.from_url(settings.redis_url, decode_responses=True)
+        now = now_sao_paulo()
+        started_at = getattr(app.state, "started_at", now)
+        uptime_min = max(0.0, (now - ensure_timezone(started_at)).total_seconds() / 60.0)
+        stale_jobs = {}
+        for job_id, interval_min in JOB_INTERVAL_MINUTES.items():
+            raw = await r.get(f"alpha:scheduler:heartbeat:{job_id}")
+            if not raw:
+                if uptime_min > interval_min * 2:
+                    stale_jobs[job_id] = "missing"
+                continue
+            payload = _json.loads(raw)
+            hb_ts = ensure_timezone(datetime.fromisoformat(payload["timestamp"]))
+            age_min = (now - hb_ts).total_seconds() / 60.0
+            if age_min > interval_min * 3:
+                stale_jobs[job_id] = f"{age_min:.1f}m old"
+        await r.aclose()
+        checks["scheduler_heartbeats"] = stale_jobs if stale_jobs else "fresh"
+        if stale_jobs:
+            overall = "degraded"
+    except Exception as exc:
+        checks["scheduler_heartbeats"] = f"error: {exc}"
 
     # 5. Paper trading stats (non-critical, best-effort)
     try:
